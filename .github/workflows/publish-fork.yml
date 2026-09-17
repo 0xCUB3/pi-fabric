@@ -2,8 +2,8 @@ name: Publish fork
 
 # Publishes the fork to npm as @e4779/pi-fabric so pi can install a
 # prebuilt tarball (npm:@e4779/pi-fabric) instead of a git clone that
-# would need a manual build after every update. The publish step stays
-# skipped (run stays green) until the NPM_TOKEN repo secret is set.
+# would need a manual build after every update. The unscoped name
+# "pi-fabric" belongs to upstream and cannot be published to.
 
 on:
   push:
@@ -21,10 +21,15 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - name: Install dependencies
         run: bun install --frozen-lockfile
-      - name: Set fork version (base-fork.<run_number>)
+      - name: Set fork identity (@e4779/pi-fabric, version base-fork.<run_number>)
         run: |
-          BASE=$(node -p "require('./package.json').version")
-          npm version "${BASE}-fork.${{ github.run_number }}" --no-git-tag-version --allow-same-version
+          node -e "
+            const fs = require('fs');
+            const p = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            p.name = '@e4779/pi-fabric';
+            p.version = p.version + '-fork.${{ github.run_number }}';
+            fs.writeFileSync('package.json', JSON.stringify(p, null, 2));
+          "
       - name: Publish (prepack runs typecheck + build)
         if: ${{ env.NPM_TOKEN != '' }}
         env:
