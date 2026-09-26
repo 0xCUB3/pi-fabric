@@ -37,3 +37,17 @@ jobs:
         run: |
           echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
           npm publish --access public
+      - name: Verify the exact version landed in the registry
+        if: ${{ env.NPM_TOKEN != '' }}
+        run: |
+          V=$(node -e "console.log(JSON.parse(require('fs').readFileSync('package.json','utf8')).version)")
+          for i in 1 2 3 4 5 6; do
+            if npm view "@e4779/pi-fabric@$V" version --prefer-online 2>/dev/null | grep -q .; then
+              echo "verified: @e4779/pi-fabric@$V is in the registry"
+              exit 0
+            fi
+            echo "attempt $i: $V not visible yet; retrying in 30s"
+            sleep 30
+          done
+          echo "::error::@e4779/pi-fabric@$V not visible in the registry after 3 minutes"
+          exit 1
