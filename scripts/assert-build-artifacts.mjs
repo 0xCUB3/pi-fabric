@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,6 +14,7 @@ const stable = [
   "agents.js",
   "jev.js",
   "protocol.js",
+  "core/provider-operations.js",
   "worker.js",
   "residency/host.js",
   "compaction/hook.js",
@@ -34,7 +36,6 @@ const lazy = [
   "fabric-runtime-state.js",
   "components/configuration.js",
   "providers/jev-provider.js",
-  "jev/browser.js",
   "jev/client.js",
   "jev/observation.js",
   "runtime/core-override-guest-types.js",
@@ -49,6 +50,8 @@ const lazy = [
   "speculation/scanner.js",
   "speculation/python-scanner.js",
   "ui/dashboard.js",
+  "ui/shell-tasks.js",
+  "ui/languages/bend.js",
   "ui/conversation.js",
   "ui/conversation-host.js",
   "ui/conversation-targets.js",
@@ -58,6 +61,7 @@ const lazy = [
   "ui/settings.js",
   "worker/event-projection.js",
   "worker/options.js",
+  "worker/recovery-watchdog.js",
   "worker/run-record.js",
   "worker/session-export.js",
 ];
@@ -71,6 +75,25 @@ const required = [
 ];
 const missing = required.filter((file) => !existsSync(join(dist, file)));
 if (missing.length > 0) throw new Error(`Missing build artifacts:\n${missing.join("\n")}`);
+
+const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+const targets = (value) => typeof value === "string" ? [value]
+  : value && typeof value === "object" ? Object.values(value).flatMap(targets) : [];
+for (const target of targets([manifest.main, manifest.types, manifest.exports, manifest.pi?.extensions])) {
+  if (!target.startsWith("./dist/") || target.split("/").includes("..") || !existsSync(join(root, target))) {
+    throw new Error(`Missing or unpackaged public entrypoint: ${target}`);
+  }
+}
+const receiptPath = "verified/generated/manifest.json";
+const sourceReceipt = readFileSync(join(root, "src", receiptPath));
+if (!sourceReceipt.equals(readFileSync(join(dist, receiptPath)))) {
+  throw new Error("Bundled verified artifact receipt differs from source");
+}
+for (const [source, expected] of Object.entries(JSON.parse(sourceReceipt).outputs)) {
+  const artifact = source.replace(/^src\//, "dist/");
+  const actual = createHash("sha256").update(readFileSync(join(root, artifact))).digest("hex");
+  if (actual !== expected) throw new Error(`Bundled verified artifact differs: ${artifact}`);
+}
 
 const chunks = join(dist, "chunks");
 const chunkFiles = existsSync(chunks)
@@ -113,10 +136,15 @@ for (const file of startupFiles) {
     }
   }
 }
+// The operation interpreter must load only when an action is dispatched.
+if ([...startupFiles].some(file => /class ProviderOperations|Fabric provider operation denied/.test(readFileSync(file, "utf8")))) {
+  throw new Error("Provider operation interpreter escaped into the startup graph");
+}
+
 const initialSource = [...startupFiles]
   .map((file) => readFileSync(file, "utf8"))
   .join("\n");
-for (const forbidden of ["src/fabric-runtime-state.ts", "src/prewalk/handoff.ts", "src/jev/client.ts", "src/ui/settings.ts", "src/ui/conversation.ts", "src/ui/conversation-chrome.ts", 'from "mcporter"']) {
+for (const forbidden of ["src/fabric-runtime-state.ts", "src/prewalk/handoff.ts", "src/jev/client.ts", "src/ui/languages/bend.ts", "src/ui/settings.ts", "src/ui/conversation.ts", "src/ui/conversation-chrome.ts", 'from "mcporter"']) {
   if (initialSource.includes(forbidden)) {
     throw new Error(`Startup static graph contains lazy module marker: ${forbidden}`);
   }
