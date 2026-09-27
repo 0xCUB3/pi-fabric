@@ -192,10 +192,10 @@ export class FabricUiController {
     try {
       const { ShellTasksView } = await import("./shell-tasks.js");
       if (epoch !== this.#epoch) return;
-      await context.ui.custom<void>((tui, theme, _keys, done) => {
+      await context.ui.custom<void>((tui, theme, keys, done) => {
         this.#closeTasks = () => done();
         const id = candidates[0]?.id;
-        this.#tasksView = new ShellTasksView({ jobs, theme, done: () => done(), requestRender: () => tui.requestRender(),
+        this.#tasksView = new ShellTasksView({ jobs, theme, keys, done: () => done(), requestRender: () => tui.requestRender(),
           rows: () => tui.terminal?.rows ?? 24, ...(id ? { id } : {}) });
         return this.#tasksView;
       }, { overlay: true, overlayOptions: { width: "94%", maxHeight: "90%", anchor: "center", margin: 1 } });

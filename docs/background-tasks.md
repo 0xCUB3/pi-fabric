@@ -50,6 +50,11 @@ works without a terminal and does not restore processes across Pi restarts.
 - The widget shows up to three tasks, elapsed time, and the command or short
   description. It stays alive after the Fabric program returns. Completion hints
   expire after 30 seconds; retained jobs remain in the inspector.
+- The rounded, theme-aware inspector groups tasks into **Active**, **Needs
+  attention** (failed/timed out), and **Finished**. Purpose/command labels lead;
+  IDs, elapsed time, exit codes and monitor delivery sit beneath each task.
+  Live tasks use Fabric's activity spinner; completed tasks have fixed status icons.
+  Arrows/PageUp/PageDown navigate the list without selecting group headings.
 - Enter opens detail; arrows/PageUp/PageDown scroll the bounded output tail; G
   follows the tail; x twice within three seconds stops; Esc backs out/closes.
 - Elapsed time and time since last output are separate. A quiet shell is not
