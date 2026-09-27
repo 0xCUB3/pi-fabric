@@ -4,6 +4,7 @@ import { createProviderComponent, type FabricProviderComponent, type FabricProvi
 import type { FabricConfig } from "./config.js";
 import type { ActionRegistry } from "./core/action-registry.js";
 import { resolveAgentDir } from "./core/agent-dir.js";
+import { createConfiguredMemorySourceRegistry } from "./memory/fs-source.js";
 import type { MeshStore, MeshIdentity } from "./mesh/store.js";
 import type { ParticipantDirectory } from "./topology/participant-directory.js";
 import { CapturedToolsProvider } from "./providers/captured-tools-provider.js";
@@ -135,12 +136,16 @@ export class RuntimeStateBuiltins {
       await this.install(createProviderComponent({provider: "memory", description: "Managed current-session recall", create: () => this.managedHost!.provider("memory")}));
     } else if (config.memory.enabled) {
       const sessionFile = context.sessionManager.getSessionFile();
+      const sources = config.memory.sources && config.memory.sources.length > 0
+        ? createConfiguredMemorySourceRegistry(config.memory.sources)
+        : undefined;
       const memoryContext: MemoryProviderContext = {
         agentDir: resolveAgentDir(),
         cwd: context.cwd,
         config: config.memory,
         sessionId,
         ...(sessionFile ? { sessionFile } : {}),
+        ...(sources ? { sources } : {}),
         getLiveBranch: () => ({
           entries: context.sessionManager.getBranch(),
           leafId: context.sessionManager.getLeafId(),

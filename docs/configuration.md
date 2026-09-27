@@ -195,6 +195,12 @@ where absent values do not participate. Orchestration programs (`agents.run` / `
     "actorPollMs": 250,
     "actorQueueLimit": 32,
     "eventContextChars": 40000
+  },
+  "memory": {
+    "enabled": true,
+    "sources": [
+      { "id": "laptop", "kind": "fs", "root": "/home/me/pi-archive" }
+    ]
   }
 }
 ```
@@ -537,6 +543,18 @@ call override → session binding → project default → Fabric default
 `mesh.eventContextChars` bounds the sanitized JSON context attached to each host-event activation. Fabric extracts images first. It stores redacted image descriptors in the mailbox and registry, then sends the raw images to the actor out of band. The character limit never truncates image base64 because base64 is not part of that JSON context.
 
 Mesh topics, shared state, and the participant directory remain project-scoped. Every runtime publishes one short-lived host lease and records for the roots, agents, and actors it owns. `agents.members()` and `mesh.members()` read those records. `agents.main()` and `agents.peers()` project roots. When a lease expires, its records leave normal discovery together. `mesh.actorPollMs` controls fallback polling for actor events and owner-addressed commands when filesystem notifications are unavailable.
+
+## Memory sources
+
+`memory.enabled` (default: true) toggles the `memory.*` provider. `memory.sources` registers portable host sources so remote or archived session trees answer source-qualified calls such as `memory.recall({ source: "laptop", ... })`; `memory.sessions` and `memory.expand` accept the same `source` argument. Without `sources`, memory behavior is unchanged: source-less calls keep their filesystem scopes and source-qualified calls fail with `source_not_found`.
+
+Each entry has three keys:
+
+- `id`: the `args.source` label. Lowercase letters, digits, dot, `_`, or dash; must start with a letter or digit and be unique across entries.
+- `kind`: the adapter kind. Only `"fs"` exists today; anything else is a configuration error at load time.
+- `root`: absolute path the `fs` adapter walks recursively for `*.jsonl` files. Native agent trees (`sessions/<encoded-cwd>/*.jsonl`) and flat archive directories both work; keys are root-relative paths, and traversal outside `root` is refused.
+
+The `fs` adapter derives each session's `revision` from the SHA-256 of the file bytes, so mtime-only touches keep follow pointers valid while content changes invalidate them. Enumeration is bounded by `memory.maxSessions` and reported through coverage reasons (`fs_source_max_sessions`, `fs_source_scan_capped`); a capped archive is never presented as complete. Ranking, branches, and expansion follow the normal engine paths described in [memory recall](memory-recall.md#portable-host-sources).
 
 ## Compaction
 

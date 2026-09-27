@@ -263,6 +263,16 @@ interface FabricEntropyConfig {
   compile: boolean;
 }
 
+/** One configured portable memory source (see docs/memory-recall.md). */
+export interface FabricMemorySourceConfig {
+  /** Registry id used as `args.source` in source-qualified memory calls. */
+  id: string;
+  /** Adapter kind; `"fs"` walks a local directory of session JSONL files. */
+  kind: "fs";
+  /** Absolute directory the `fs` adapter enumerates recursively. */
+  root: string;
+}
+
 export interface FabricMemoryConfig {
   enabled: boolean;
   indexDir?: string;
@@ -281,6 +291,8 @@ export interface FabricMemoryConfig {
   regexMaxHaystackTerms?: number;
   regexMaxHaystackBytes?: number;
   regexTimeoutMs?: number;
+  /** Configured portable sources; present enables source-qualified calls. */
+  sources?: FabricMemorySourceConfig[];
 }
 
 export interface FabricSpeculationConfig {
@@ -683,6 +695,46 @@ const riskValue = (value: unknown, fallback: FabricRisk): FabricRisk =>
     ? value
     : fallback;
 
+const MEMORY_SOURCE_ID_PATTERN = /^[a-z0-9][a-z0-9_.-]{0,127}$/;
+
+/**
+ * Parse `memory.sources`. A wrong-typed value stays absent like every other
+ * memory key, but a present array with malformed entries is a hard config
+ * error: a silently dropped source would surface only as a confusing
+ * `source_not_found` at call time. The id charset is the portable registry's
+ * SOURCE_ID_PATTERN restricted to lowercase.
+ */
+const memorySourcesValue = (value: unknown): FabricMemorySourceConfig[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  const sources: FabricMemorySourceConfig[] = [];
+  const seen = new Set<string>();
+  value.forEach((raw, index) => {
+    const entry = objectValue(raw);
+    const where = `memory.sources[${index}]`;
+    const id = stringValue(entry.id);
+    if (!id || !MEMORY_SOURCE_ID_PATTERN.test(id)) {
+      throw new Error(
+        `Invalid ${where}: id must be 1-128 chars of lowercase letters, digits, dot, underscore, or dash, starting with a letter or digit`,
+      );
+    }
+    if (entry.kind !== "fs") {
+      throw new Error(
+        `Invalid ${where}: unknown kind ${JSON.stringify(entry.kind ?? null)}; expected "fs"`,
+      );
+    }
+    const root = stringValue(entry.root);
+    if (!root || !path.isAbsolute(root)) {
+      throw new Error(`Invalid ${where}: root must be an absolute directory path`);
+    }
+    if (seen.has(id)) {
+      throw new Error(`Invalid ${where}: duplicate source id ${JSON.stringify(id)}`);
+    }
+    seen.add(id);
+    sources.push({ id, kind: "fs", root });
+  });
+  return sources.length > 0 ? sources : undefined;
+};
+
 export const normalizeFabricConfig = (input: Record<string, unknown>): FabricConfig => {
   const executor = objectValue(input.executor);
   const cpython = objectValue(executor.cpython);
@@ -707,6 +759,7 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
   const retention = objectValue(input.retention);
   const mesh = objectValue(input.mesh);
   const memory = objectValue(input.memory);
+  const memorySources = memorySourcesValue(memory.sources);
   const entropy = objectValue(input.entropy);
   const repairs = objectValue(input.repairs);
   const modelsSection = objectValue(input.models);
@@ -1150,6 +1203,7 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
     memory: {
       enabled: booleanValue(memory.enabled, DEFAULT_FABRIC_CONFIG.memory.enabled),
       ...(memoryIndexDir ? { indexDir: memoryIndexDir } : {}),
+      ...(memorySources ? { sources: memorySources } : {}),
       maxSessions: boundedInteger(
         memory.maxSessions,
         DEFAULT_FABRIC_CONFIG.memory.maxSessions,
