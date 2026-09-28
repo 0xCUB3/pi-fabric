@@ -747,10 +747,10 @@ describe("outer-boundary Prewalk", () => {
     };
     const ordinaryMessage = { role: "user", content: "keep me" };
 
-    it("keeps planning directives visible while the arm is live", () => {
+    it("keeps planning directives visible while the arm owes a plan", () => {
       const result = filterPrewalkPlanningDirectives(
         [armedDirective, checkpointDirective, failureMessage, ordinaryMessage],
-        true,
+        true, true,
       );
       expect(result).toEqual({
         messages: [armedDirective, checkpointDirective, failureMessage, ordinaryMessage],
@@ -761,27 +761,56 @@ describe("outer-boundary Prewalk", () => {
     it("drops armed and checkpoint directives once the arm is claimed or off", () => {
       const result = filterPrewalkPlanningDirectives(
         [armedDirective, checkpointDirective, failureMessage, ordinaryMessage],
-        false,
+        false, false,
       );
       expect(result).toEqual({ messages: [failureMessage, ordinaryMessage], changed: true });
     });
 
     it("leaves directive-free requests untouched when planning is hidden", () => {
-      const result = filterPrewalkPlanningDirectives([failureMessage, ordinaryMessage], false);
+      const result = filterPrewalkPlanningDirectives([failureMessage, ordinaryMessage], false, false);
       expect(result).toEqual({ messages: [failureMessage, ordinaryMessage], changed: false });
     });
 
-    it("derives visibility from live controller state across claim and cancel", () => {
+    it("retires planning immediately after recording and restores it on rearm", () => {
       const controller = new PrewalkController();
-      controller.arm({ model: "neuralwatt/kimi-k3", sessionId: "session-1" });
-      const projected = (messages: unknown[]) =>
-        filterPrewalkPlanningDirectives(messages as never[], controller.isArmed("session-1")).messages;
-      expect(projected([armedDirective, ordinaryMessage])).toEqual([armedDirective, ordinaryMessage]);
+      const arm = { model: "neuralwatt/kimi-k3", sessionId: "session-1", requirePlan: true };
+      controller.arm(arm);
+      const messages = [armedDirective, checkpointDirective, ordinaryMessage];
+      const projected = (input: unknown[]) => filterPrewalkPlanningDirectives(
+        input, controller.isArmed("session-1"), controller.planRequired("session-1"),
+      ).messages;
+      expect(projected(messages)).toEqual(messages);
+      controller.submitPlan("session-1", {
+        outcome: "Guard discovery", steps: ["Edit provider"], verification: ["Run tests"], risks: "None",
+      });
+      expect(controller.isArmed("session-1")).toBe(true);
+      expect(projected(messages)).toEqual([ordinaryMessage]);
+      expect(messages).toHaveLength(3); // Request filtering never changes persisted history.
+      controller.arm(arm);
+      expect(projected(messages)).toEqual(messages);
+      controller.submitPlan("session-1", {
+        outcome: "Guard discovery", steps: ["Edit provider"], verification: ["Run tests"], risks: "None",
+      });
       const pending = claimHandoff(controller, execution(), "session-1", "json");
       expect(pending).toBeDefined();
       expect(projected([armedDirective, checkpointDirective, ordinaryMessage])).toEqual([ordinaryMessage]);
       controller.cancel();
       expect(projected([armedDirective, ordinaryMessage])).toEqual([ordinaryMessage]);
+    });
+
+    it("preserves ungated handoff advice but hides stale planning requests", () => {
+      const ungated = {
+        ...armedDirective,
+        content: prewalkArmedPrompt("in-place", "neuralwatt/kimi-k3", false),
+        details: { ...armedDirective.details, requirePlan: false },
+      };
+      const messages = [armedDirective, checkpointDirective, ungated, ordinaryMessage];
+      expect(filterPrewalkPlanningDirectives(messages, true, false)).toEqual({
+        messages: [ungated, ordinaryMessage], changed: true,
+      });
+      expect(filterPrewalkPlanningDirectives(messages, false, false)).toEqual({
+        messages: [ordinaryMessage], changed: true,
+      });
     });
 
     it("directs the executor to report once and stop after verified completion", async () => {
@@ -1370,6 +1399,7 @@ describe("outer-boundary Prewalk", () => {
           controller.pendingContinuationMessage("session-1"),
         ).messages,
         controller.isArmed("session-1"),
+        controller.planRequired("session-1"),
       ).messages,
       streamFn: (_model, context) => {
         requests.push(JSON.stringify(context.messages));
@@ -1531,6 +1561,7 @@ describe("outer-boundary Prewalk", () => {
           controller.pendingContinuationMessage("session-1"),
         ).messages,
         controller.isArmed("session-1"),
+        controller.planRequired("session-1"),
       ).messages,
       streamFn: (_model, context) => {
         requests.push(JSON.stringify(context.messages));

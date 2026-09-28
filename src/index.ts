@@ -775,12 +775,12 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
         state.prewalk.acceptContinuation(sessionId, continuationId),
       pendingContinuation,
     );
-    // Planning directives are phase-scoped: visible only while this session's
-    // arm is live (Main still owes its plan). A claimed handoff or an off arm
-    // must not project stale planning instructions into later requests.
+    // Retire requests to plan as soon as the plan is recorded, not just when
+    // handoff claims the arm. Ungated arm advisories remain while armed.
     const planning = filterPrewalkPlanningDirectives(
       continuation.messages,
       state.initialized && state.prewalk.isArmed(sessionId),
+      state.initialized && state.prewalk.planRequired(sessionId),
     );
     let changed = continuation.changed || planning.changed;
     const messages = planning.messages.map((message) => {

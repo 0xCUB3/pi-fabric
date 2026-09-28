@@ -1368,6 +1368,8 @@ interface FabricPrewalkFileIdentityStatus {
   stale: boolean;
 }
 interface FabricPrewalkApi {
+  /** Only when Fabric's armed advisory or checkpoint requests an executor handoff plan.
+   * Not a task planner, checklist, or acceptance-ledger store; unavailable otherwise. */
   plan(args: {
     outcome: string;
     steps: string[];
