@@ -14,6 +14,7 @@ import { CapturedToolCatalog } from "./capture/catalog.js";
 import { installRegisteredToolCapture } from "./capture/interceptor.js";
 import { registerFabricCommand } from "./commands/fabric.js";
 import { resolveAgentDir } from "./core/agent-dir.js";
+import { FileLockTimeoutError } from "./core/file-lock.js";
 import {
   comparableCompiledSurfaceScore,
   BackgroundEntropyCompiler,
@@ -23,10 +24,9 @@ import {
   formatEntropyCompileNotice,
   liveSurfaceSnapshot,
   loadCompiledSurfaceAsync,
-  loadObservationPoolAsync,
   machineSessionFilesAsync,
   saveCompiledSurfaceAsync,
-  saveObservationPoolAsync,
+  updateObservationPoolAsync,
   sessionWindowEvidenceAsync,
 } from "./entropy/index.js";
 import { setActiveCompiledSurface } from "./entropy/active.js";
@@ -394,6 +394,14 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
   let entropyCompileInFlight: Promise<void> | undefined;
   let entropyCompilePending: EntropyCompileRequest | undefined;
   let entropyLifecycleEpoch = 0;
+  let entropyStopping = false;
+  let entropyRetryTimer: ReturnType<typeof setTimeout> | undefined;
+  let entropyRetryDelayMs = 1_000;
+  const clearEntropyRetry = (reset = true): void => {
+    if (entropyRetryTimer) clearTimeout(entropyRetryTimer);
+    entropyRetryTimer = undefined;
+    if (reset) entropyRetryDelayMs = 1_000;
+  };
   const createEntropyCaches = () => ({
     compiler: new BackgroundEntropyCompiler(),
     observations: new SessionObservationCache(),
@@ -410,66 +418,76 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
   const compileEntropyNow = async (
     context: ExtensionContext,
     epoch: number,
-  ): Promise<void> => {
+  ): Promise<boolean> => {
     const current = (): boolean =>
       epoch === entropyLifecycleEpoch && state.initialized && state.config.entropy.compile;
-    if (!current()) return;
+    if (!current()) return false;
+    let retry = false;
     const agentDir = resolveAgentDir();
     const cwd = state.cwd ?? context.cwd;
     const repairs = entropyRepairRows(state.repairs.repairs);
     const caches = entropyCaches;
-    const [files, loaded, poolLoaded, snapshot] = await Promise.all([
+    const [files, loaded, snapshot] = await Promise.all([
       caches.sessions.select(agentDir, cwd, context.sessionManager.getSessionFile?.()),
       loadCompiledSurfaceAsync(agentDir),
-      loadObservationPoolAsync(agentDir),
       liveSurfaceSnapshot({ registry: state.registry, extensionContext: context, cwd }),
     ]);
-    if (!current() || loaded.error) return;
+    if (!current() || loaded.error) return false;
     const evidence = await sessionWindowEvidenceAsync(files, { windowsOnly: true });
-    if (!current()) return;
-    const mergedPool = await caches.observations.merge(
-      poolLoaded.file,
-      evidence.observationWindows,
-    );
-    if (!poolLoaded.error && (mergedPool.mergedSessions > 0 || !poolLoaded.file)) {
-      await saveObservationPoolAsync(agentDir, mergedPool.file);
+    if (!current()) return false;
+    try {
+      await updateObservationPoolAsync(agentDir, evidence.observationWindows, caches.observations);
+    } catch (error) {
+      if (error instanceof FileLockTimeoutError) {
+        retry = true;
+      } else {
+        // Advisory evidence cannot gate the normal-form compiler. Preserve
+        // damaged files and surface real failures rather than hiding them as busy.
+        console.warn(`[pi-fabric] observation pool update failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
-    if (!current()) return;
+    if (!current()) return false;
     const outcome = await caches.compiler.compile({
       windows: evidence.traceWindows,
       surface: snapshot,
       repairs,
       ...(loaded.file ? { artifact: loaded.file } : {}),
     });
-    if (!current()) return;
+    if (!current()) return false;
     if (outcome.status === "compiled" && outcome.artifact) {
-      const saved = await saveCompiledSurfaceAsync(agentDir, outcome.artifact);
-      if (current()) {
-        // Activate even when another process already persisted identical bytes.
-        setActiveCompiledSurface(saved.file);
-        // The notice is progress evidence, not a heartbeat: show it only when
-        // the fresh score measurably lowered the previously persisted surface.
-        const previousScore = comparableCompiledSurfaceScore(loaded.file, saved.file.metricVersion);
-        if (previousScore !== undefined && outcome.report.score < previousScore && context.hasUI) {
-          context.ui.notify(formatEntropyCompileNotice({
-            beforeScore: previousScore,
-            afterScore: outcome.report.score,
-            normalizations: saved.file.normalizations?.length ?? 0,
-          }), "info");
+      try {
+        const saved = await saveCompiledSurfaceAsync(agentDir, outcome.artifact);
+        if (current()) {
+          // Activate even when another process already persisted identical bytes.
+          setActiveCompiledSurface(saved.file);
+          const previousScore = comparableCompiledSurfaceScore(loaded.file, saved.file.metricVersion);
+          if (previousScore !== undefined && outcome.report.score < previousScore && context.hasUI) {
+            context.ui.notify(formatEntropyCompileNotice({
+              beforeScore: previousScore,
+              afterScore: outcome.report.score,
+              normalizations: saved.file.normalizations?.length ?? 0,
+            }), "info");
+          }
         }
+      } catch (error) {
+        if (!(error instanceof FileLockTimeoutError)) throw error;
+        // Proof-checked plans are usable now; durable persistence can catch up
+        // later without blocking this session on another process's writer.
+        if (current()) setActiveCompiledSurface(outcome.artifact);
+        retry = true;
       }
     }
-    // Advisory abstraction suggestions remain available on demand. Static
-    // normalization never asks the user to approve a compatibility repair.
+    return retry && current();
   };
 
   const launchEntropyCompile = (request: EntropyCompileRequest): void => {
+    let retry = false;
     const task = (async () => {
       try {
         if (request.delayMs > 0) {
           await new Promise((resolve) => setTimeout(resolve, request.delayMs));
         }
-        await compileEntropyNow(request.context, request.epoch);
+        retry = await compileEntropyNow(request.context, request.epoch);
       } catch (error) {
         console.warn(
           `[pi-fabric] entropy compile failed: ${
@@ -484,7 +502,21 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
       entropyCompileInFlight = undefined;
       const pending = entropyCompilePending;
       entropyCompilePending = undefined;
-      if (pending) launchEntropyCompile(pending);
+      if (!retry && request.epoch === entropyLifecycleEpoch) entropyRetryDelayMs = 1_000;
+      if (pending) {
+        launchEntropyCompile(pending);
+      } else if (retry && !entropyStopping && request.epoch === entropyLifecycleEpoch) {
+        // One unref'ed timer, not an in-flight sleep: idle retries never hold
+        // shutdown open. Equal jitter prevents sibling Pi processes retrying
+        // in lockstep, and the delay caps at 30 seconds without a tight loop.
+        const delay = entropyRetryDelayMs * (0.5 + Math.random() * 0.5);
+        entropyRetryDelayMs = Math.min(30_000, entropyRetryDelayMs * 2);
+        entropyRetryTimer = setTimeout(() => {
+          entropyRetryTimer = undefined;
+          launchEntropyCompile({ ...request, delayMs: 0 });
+        }, delay);
+        entropyRetryTimer.unref();
+      }
     });
   };
 
@@ -492,6 +524,7 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
     context: ExtensionContext,
     delayMs = 250,
   ): void => {
+    clearEntropyRetry(false);
     const request = { context, delayMs, epoch: entropyLifecycleEpoch };
     if (entropyCompileInFlight) {
       entropyCompilePending = request;
@@ -505,6 +538,8 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
   };
 
   pi.on("session_start", async (_event, context) => {
+    clearEntropyRetry();
+    entropyStopping = false;
     entropyLifecycleEpoch += 1;
     entropyCaches = createEntropyCaches();
     entropyEvidenceThisTurn = false;
@@ -909,6 +944,8 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
   });
 
   pi.on("session_shutdown", async (_event, context) => {
+    entropyStopping = true;
+    clearEntropyRetry();
     // Queue the richest final window and let async I/O/cooperative scoring
     // finish before teardown; the TUI event loop remains responsive.
     if (entropyEvidenceThisTurn) {
