@@ -11,6 +11,8 @@ import { truncateMiddle } from "../util.js";
 import type { FabricUiController } from "../ui/controller.js";
 import { FABRIC_CONVERSATION_SHORTCUT } from "../ui/conversation-shortcut.js";
 import { safeText } from "../ui/format.js";
+import { FabricModelSelector } from "../ui/fabric-model-selector.js";
+import { buildModelSource } from "../ui/model-picker.js";
 import {
   FABRIC_PEER_AWAIT_SETTLE_EVENT,
   FABRIC_PEER_CARDS_EVENT,
@@ -143,6 +145,25 @@ const resolvePrewalkModel = async (
       "error",
     );
     return undefined;
+  }
+  if (typeof context.ui.custom === "function") {
+    try {
+      // undefined = host can't show the dialog; { model: undefined } = user cancelled.
+      const picked = await context.ui.custom<{ model?: string | undefined } | undefined>(
+        (_tui, theme, _keybindings, done) =>
+          new FabricModelSelector({
+            theme,
+            source: buildModelSource(context.modelRegistry, resolveAgentDir()),
+            currentValue: "",
+            headerText:
+              "Prewalk executor model. Fabric hands off at the next matching mutation boundary; Main continues on the picked model.",
+            inheritRow: false,
+            onSelect: (value) => done({ model: value }),
+            onCancel: () => done({ model: undefined }),
+          }),
+      );
+      if (picked !== undefined) return picked.model;
+    } catch {}
   }
   return context.ui.select("Prewalk executor model", keys);
 };
