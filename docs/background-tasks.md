@@ -20,6 +20,34 @@ branch navigation discards delivery from old-frontier jobs. Session shutdown/rel
 closes the inbox before aborting jobs, so cleanup cannot start a new turn.
 Print-mode processes do not stay alive indefinitely just to receive late events.
 
+## Extension timing bridge
+
+Fabric emits `pi-fabric:shell:timing:v1` on the owning session's `pi.events` bus.
+`FABRIC_SHELL_TIMING_EVENT` and `FabricShellTimingV1` are exported from
+`pi-fabric/protocol`; optional consumers may mirror the contract without importing
+Fabric. The payload contains only:
+
+```ts
+{ version: 1, sessionId, taskId, tool: "bash" | "powershell",
+  phase: "started" | "finished", timestamp }
+```
+
+`started` is emitted synchronously at background handoff (explicit, hang threshold,
+manual, or monitor), not process creation. `finished` is emitted at terminal
+observation for any outcome, or before runtime teardown closes the job store.
+Timestamps are observation times in epoch milliseconds, not backdated process
+start/exit times. Foreground-only jobs emit neither event. No command, output,
+path, credentials, or model message is included. Acknowledgements and output
+monitor batches do not change timing, and UI-only jobs are included.
+
+Consumers must filter by session, deduplicate task transitions, and union these
+intervals with foreground tool calls rather than adding full job durations to
+already-metered calls. pi-ledger records only the additional background union as
+agent tool time, including between turns. No polling, model wakeup, or new setting
+is involved. Shutdown/reload closes live spans; processes and clocks are not
+restored on restart. Billing consumers should also flush at their own shutdown
+before sealing their log, regardless of extension shutdown order.
+
 ## Agent awareness and yielding
 
 Before each model request, Fabric projects one bounded live-task reminder into

@@ -123,6 +123,7 @@ import {
 import { AgentManager } from "./agents/manager.js";
 import { AgentCompletionInbox } from "./agents/completion-inbox.js";
 import { ShellEventInbox } from "./core/shell-inbox.js";
+import { FabricShellTimingBridge } from "./core/shell-timing.js";
 import { resolveInheritedSessionPins } from "./agents/session-pins.js";
 import { ResidencyClient } from "./residency/client.js";
 import { RESIDENT_HOST_FORMAT, residentRoot } from "./residency/protocol.js";
@@ -174,6 +175,7 @@ export class FabricRuntimeState {
   #agents: AgentManager | undefined;
   #completionInbox: AgentCompletionInbox | undefined;
   #shellInbox: ShellEventInbox | undefined;
+  #shellTiming: FabricShellTimingBridge | undefined;
   #actors: ActorDirectory | undefined;
   #jevObservationHost: JevObservationHost | undefined;
   #globalActors: GlobalActorRegistry | undefined;
@@ -347,6 +349,10 @@ export class FabricRuntimeState {
     try {
       await this.#closeInternal();
       this.#shellJobs = new FabricShellJobStore();
+      const sessionId = context.sessionManager?.getSessionId?.();
+      if (sessionId && this.pi.events) {
+        this.#shellTiming = new FabricShellTimingBridge(this.pi.events, sessionId, this.#shellJobs);
+      }
     } finally {
       this.#suppressResidentGuidanceSync = false;
     }
@@ -1310,6 +1316,8 @@ export class FabricRuntimeState {
     this.#completionInbox = undefined;
     this.#shellInbox?.close();
     this.#shellInbox = undefined;
+    this.#shellTiming?.close();
+    this.#shellTiming = undefined;
     this.#suppressResidentGuidanceSync = true;
     await this.#deactivateRepairs();
     clearActiveCompiledSurface();
@@ -1411,6 +1419,8 @@ export class FabricRuntimeState {
     this.#completionInbox = undefined;
     this.#shellInbox?.close();
     this.#shellInbox = undefined;
+    this.#shellTiming?.close();
+    this.#shellTiming = undefined;
     await this.shellJobs.close();
     await this.#deactivateRepairs();
     if (!this.#registry) return;
