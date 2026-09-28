@@ -19,7 +19,7 @@ QuickJS is isolated by default and receives static type checking; native Node/Bu
 | Tool | Form | Returns |
 |------|------|---------|
 | `read` | `path` \| `{path,offset?,limit?}` \| `(path, options?)` | `string` |
-| `bash` | `command` \| `{command,timeout?,cwd?,settle?,background?}` \| `(command, options?)` | `{ok:true,output,details}`; rejects on a nonzero exit (`settle:true` returns `{ok:false,...}`; `background: true` detaches immediately with a still-running envelope) |
+| `bash` | `command` \| `{command,timeout?,cwd?,settle?,background?,description?,monitor?}` \| `(command, options?)` | `{ok:true,output,details}`; rejects on a nonzero exit (`settle:true` returns `{ok:false,...}`; `background: true` detaches immediately with a still-running envelope) |
 | `powershell` | Windows only; same forms and result contract as `bash` | `{ok:true,output,details}`; supports `settle:true` and `background: true` |
 | `grep` | `pattern` \| `{pattern,path?,glob?,ignoreCase?,literal?,context?,limit?}` \| `(pattern, path?, limit?)` | `string` |
 | `find` | `pattern` \| `{pattern,path?,limit?}` \| `(pattern, path?, limit?)` | `string` |
@@ -31,7 +31,9 @@ QuickJS is isolated by default and receives static type checking; native Node/Bu
 
 For `pi.edit`, entry-level `all:true` applies that replacement to every non-overlapping occurrence; top-level `all:true` applies every entry that way. Omit it for unique anchors.
 
-Shell tools reject on an ordinary nonzero exit; pass `settle:true` to get `{ok:false,output,details:null,exitCode,error}` instead of a rejection. `background: true` (alias `run_in_background`) returns immediately with `ok: true`, a pid, and a live output path while the process keeps running — do not poll; `pi.read` the path when you need output, or `kill <pid>`. Nested shells that exceed `executor.shellHangMs` (default 2m) auto-spill the same way. Timeout, cancellation, approval, security, and spawn failures still reject. Other Pi core tool errors reject normally.
+Shell tools reject on an ordinary nonzero exit; pass `settle:true` to get `{ok:false,output,details:null,exitCode,error}` instead of a rejection. `background: true` (alias `run_in_background`) returns immediately with `ok: true`, `details.taskId`, a pid, and a live output path while the process keeps running. Completion notifies the owning session; do not poll. Use `tools.call({ref:'tasks.list',args:{}})`, `tasks.get` or `tasks.stop` with `{id: taskId}` (tasks is not a sandbox global), or `pi.read` the bounded log. Nested shells that exceed `executor.shellHangMs` (default 2m) auto-spill the same way. Timeout, cancellation, approval, security, and spawn failures still reject. Other Pi core tool errors reject normally.
+
+Opt-in `monitor:{delivery:'wake',match:'literal',timeoutMs:300000,intervalMs:5000}` on `pi.bash`/`pi.powershell` also detaches. Delivery must explicitly be `ui` (never wakes the agent) or `wake` (coalesced line events may start an owning-agent turn). Watches expire, never auto-renew, and stop on Main interruption. Use scripts that emit meaningful changes only; no inference is used to poll. The default lifetime is 5m (maximum 30m), event interval 5s (1–60s), with at most eight monitors. See [background tasks](../../../docs/background-tasks.md).
 
 Aliases are normalized to canonical fields before host validation. Command aliases include `cmd`/`shell`/`cmdline`/`script`/`commandLine`; pattern aliases include `query`/`regex`/`search` plus `q`/`expression`/`text` for grep and `name`/`filename`/`glob`/`include` for find. Path aliases include `file`, `file_path`, camel-case path variants, `dir`/`folder`/`directory`, and target-file variants. Edit text accepts `old`/`from`/`old_string`-style and `new`/`to`/`replacement`/`new_string`-style spellings, including inside `edits`; write content accepts `contents`/`body`/`text`/`data`/`fileContent`. `ic`/`caseInsensitive`→`ignoreCase`, `globPattern`→`glob`, `ctx`→`context`, `max`→`limit`, and `start`→`offset`.
 
@@ -91,6 +93,9 @@ All calls return promises. Fields ending in `?` are optional; `unknown` marks pr
 | `compact.request(args?)` | `{requested:true,intent:{reason?,instructions?,preserve?,requestedBy,requestedAt}}` |
 | `compact.status()` | `{pending?:CompactIntent,last?:{at,requestedBy,status,summary?,tokensBefore?,estimatedTokensAfter?,error?}}` |
 | `compact.cancel()` | `{cancelled:true}` |
+| `cache.status({target?}?)` | Local session cache observations, live leases, capability/cleanup diagnostics; observations do not prove residency |
+| `cache.hold({target?,durationMs,maxRefreshes?,maxCostUsd?})` | `{status:"held",id,scope,sessionId,model,expiresAt}` or an unsupported/unavailable result with a reason; paid native opt-in, no fallback; cost/count bounds currently unsupported |
+| `cache.release({id})` | `{released,cleanupError}`; session-owned holds only; expiry/cleanup is not a refund |
 | `jev.evaluate(args)` | `{model,answers,usage:{input_tokens,output_tokens}}`; typed Choice/Noul/Score answers, not generated text |
 | `jev.run({program,input})` | terminal `FabricJevRun`: `{id,state,result?,error?,evaluations,toolCalls,usage,events,nextSequence,logs,...}` |
 | `jev.spawn({program,input,observe?})` | `FabricJevRun` initially `running`; session-owned, not restart-durable |
@@ -99,6 +104,8 @@ All calls return promises. Fields ending in `?` are optional; `unknown` marks pr
 | `jev.join({id})` | alias for `jev.wait`, with the same arguments, result, and cancellation behavior |
 | `jev.advise({id,eventId,message})` | `{delivered,reason?}`; current observed event only; explicit delivery, agent approvals, freshness and feedback gates apply |
 | `jev.stop({id})` | terminal run envelope after cancellation/cleanup; no rollback of already-issued effects |
+
+`cache` targets the local Pi session (`self`); `main` is accepted only in root runtimes. Holds require a compatible native scoped-warming API, are bounded to 1–1800 seconds, and never change native settings. Current stock SDKs return unsupported. Never simulate warming with prompts. See [prompt-cache contracts](../../../docs/prompt-cache.md).
 
 `memory.recall` multi-term literal queries default to ranked `queryMatch: "any"` so wording differences do not hide evidence; use `"all"` to require every canonical term in one indexed entry, and `queryMode: "phrase"` when adjacency matters. Results are hard-bounded either way. Structural filters (`ref`, `provider`, `action`, `outcome`) use exact persisted trace fields. Use `tools.catalog()`/`tools.search()` only to choose a current action head—catalog descriptions are navigation metadata and never become session evidence.
 

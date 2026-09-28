@@ -509,6 +509,9 @@ type PiReadOptions = { offset?: number; limit?: number; start?: number; max?: nu
 type PiShellOptions = {
   timeout?: number; timeoutMs?: number; settle?: boolean;
   background?: boolean; run_in_background?: boolean;
+  description?: string;
+  /** Opt-in line events; implies background. ui never wakes the model; wake may start an owning-agent turn. */
+  monitor?: { delivery: "ui" | "wake"; timeoutMs?: number; intervalMs?: number; match?: string };
   cwd?: string; workdir?: string; directory?: string; workingDirectory?: string;
 };
 type PiBashOptions = PiShellOptions;
@@ -1312,6 +1315,39 @@ interface FabricComponentsApi {
   reload(args?: { id?: string }): Promise<{ components: FabricComponentInfo[] }>;
 }
 
+interface FabricCacheHoldOptions {
+  target?: "self" | "main";
+  durationMs: number;
+  /** Currently unsupported: requesting this bound rejects acquisition. */
+  maxRefreshes?: number;
+  /** Currently unsupported: requesting this bound rejects acquisition. */
+  maxCostUsd?: number;
+}
+interface FabricCacheLease {
+  id: string; scope: "session" | "component"; sessionId: string; model: string; expiresAt: number;
+}
+type FabricCacheHoldResult = ({ status: "held" } & FabricCacheLease)
+  | { status: "unsupported" | "unavailable"; reason: string };
+interface FabricCacheSample {
+  entryId: string; observedAt: number; input: number; cacheRead: number; cacheWrite: number;
+  output: number; totalInput: number; cacheReadShare: number; reportedCostUsd: number | null;
+}
+interface FabricCacheObservation {
+  lastRequest: FabricCacheSample | null; lastRefresh: FabricCacheSample | null;
+  maintenance: { requests: number; tokens: number; reportedCostUsd: number; unknownCostRequests: number; unknownTokenRequests: number };
+  window: { entries: number; limit: number; truncated: boolean; stoppedAt: string | null };
+}
+interface FabricCacheStatus {
+  target: "self"; sessionId: string; model: string | null; supported: boolean; reason: string | null;
+  limits: { durationMs: true; maxRefreshes: false; maxCostUsd: false };
+  leases: FabricCacheLease[]; scheduled: null; cleanupError: string | null; observation: FabricCacheObservation;
+}
+interface FabricCacheApi {
+  status(args?: { target?: "self" | "main" }): Promise<FabricCacheStatus>;
+  hold(args: FabricCacheHoldOptions): Promise<FabricCacheHoldResult>;
+  release(args: { id: string }): Promise<{ released: boolean; cleanupError: string | null }>;
+}
+
 interface FabricCompactApi {
   request(args?: {
     reason?: string;
@@ -1332,6 +1368,8 @@ interface FabricPrewalkFileIdentityStatus {
   stale: boolean;
 }
 interface FabricPrewalkApi {
+  /** Only when Fabric's armed advisory or checkpoint requests an executor handoff plan.
+   * Not a task planner, checklist, or acceptance-ledger store; unavailable otherwise. */
   plan(args: {
     outcome: string;
     steps: string[];
@@ -1404,6 +1442,7 @@ declare const state: FabricStateApi;
 declare const schema: FabricSchemaApi;
 declare const components: FabricComponentsApi;
 declare const compact: FabricCompactApi;
+declare const cache: FabricCacheApi;
 declare const prewalk: FabricPrewalkApi;
 ${JEV_GUEST_DECLARATIONS}
 declare const council: FabricCouncilApi;

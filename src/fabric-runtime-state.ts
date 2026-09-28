@@ -104,6 +104,7 @@ import {
 } from "./main-agent.js";
 import { AgentsProvider } from "./providers/agents-provider.js";
 import { CompactProvider } from "./providers/compact-provider.js";
+import { CacheProvider } from "./providers/cache-provider.js";
 import { PrewalkProvider } from "./providers/prewalk-provider.js";
 import { ComponentsProvider } from "./providers/components-provider.js";
 import type { McpProviderHooks } from "./providers/mcp-provider.js";
@@ -121,6 +122,8 @@ import {
 } from "./protocol.js";
 import { AgentManager } from "./agents/manager.js";
 import { AgentCompletionInbox } from "./agents/completion-inbox.js";
+import { ShellEventInbox } from "./core/shell-inbox.js";
+import { FabricShellTimingBridge } from "./core/shell-timing.js";
 import { resolveInheritedSessionPins } from "./agents/session-pins.js";
 import { ResidencyClient } from "./residency/client.js";
 import { RESIDENT_HOST_FORMAT, residentRoot } from "./residency/protocol.js";
@@ -171,6 +174,8 @@ export class FabricRuntimeState {
   #speculation: RuntimeStateSpeculation | undefined;
   #agents: AgentManager | undefined;
   #completionInbox: AgentCompletionInbox | undefined;
+  #shellInbox: ShellEventInbox | undefined;
+  #shellTiming: FabricShellTimingBridge | undefined;
   #actors: ActorDirectory | undefined;
   #jevObservationHost: JevObservationHost | undefined;
   #globalActors: GlobalActorRegistry | undefined;
@@ -198,7 +203,8 @@ export class FabricRuntimeState {
   readonly #builtinComponentNames = new Set<string>();
   readonly componentCatalog = new FabricComponentCatalog();
   readonly activity: FabricActivityStore;
-  readonly shellJobs = new FabricShellJobStore();
+  #shellJobs = new FabricShellJobStore();
+  get shellJobs(): FabricShellJobStore { return this.#shellJobs; }
   readonly prewalk: PrewalkController;
   readonly prewalkDrift: PrewalkDriftTracker;
   readonly sessionApprovals: FabricSessionApprovals;
@@ -342,6 +348,11 @@ export class FabricRuntimeState {
     this.#suppressResidentGuidanceSync = true;
     try {
       await this.#closeInternal();
+      this.#shellJobs = new FabricShellJobStore();
+      const sessionId = context.sessionManager?.getSessionId?.();
+      if (sessionId && this.pi.events) {
+        this.#shellTiming = new FabricShellTimingBridge(this.pi.events, sessionId, this.#shellJobs);
+      }
     } finally {
       this.#suppressResidentGuidanceSync = false;
     }
@@ -433,6 +444,9 @@ export class FabricRuntimeState {
       jobs: this.shellJobs,
       getHangMs: () => this.#config?.executor.shellHangMs ?? DEFAULT_SHELL_HANG_MS,
     });
+    if (!this.#managedHost && (this.#config.fullCodeMode || enforceSchema)) {
+      this.#shellInbox = new ShellEventInbox(this.pi, context, this.shellJobs);
+    }
     // One definition for both host modes: the controller belongs to this
     // runtime state, so managed and normal sessions share a single wiring site.
     await builtins.install(createProviderComponent({
@@ -447,6 +461,7 @@ export class FabricRuntimeState {
     }));
     if (this.#managedHost) {
       this.#registry.markUnavailable("jev", "Jev programs are unavailable in managed hosts");
+      this.#registry.markUnavailable("cache", "Native prompt-cache access is unavailable in managed hosts");
       // Closed-world hosts must never construct unused native managers, stores or model history.
       for (const name of ["agents", "schema", "compact", "memory", "mesh", "state"]) {
         if (["agents", "schema", "compact"].includes(name) || this.#managedHost.has(name)) {
@@ -462,6 +477,11 @@ export class FabricRuntimeState {
     }
     const sessionId = context.sessionManager.getSessionId();
     const { identity, mainAgentId } = resolveFabricIdentity(sessionId);
+    await builtins.install(createProviderComponent({
+      provider: "cache",
+      description: "Local prompt-cache observations and scoped native warming",
+      create: () => new CacheProvider(this.pi, context, identity.kind === "main"),
+    }));
     const fabricSessionId = process.env.PI_FABRIC_SESSION_ID?.trim() || sessionId;
     const ownsPersistentActorRegistry =
       identity.kind === "main" &&
@@ -832,11 +852,11 @@ export class FabricRuntimeState {
       const { JevObservationHost } = await import("./jev/observation.js");
       await builtins.install(createProviderComponent({
         provider: "jev",
-        description: "TypeSafe System One judgments and reactive programs",
+        description: "Shell orchestration and explicit typed Jev decisions",
         create: (component) => {
           component.guide({
             label: "jev-programs", models: ["*/*"], targets: ["main", "participant"],
-            content: "Jev supplies typed Choice, Noul, and Score judgments, not generated text. Use jev.evaluate for batched questions; jev.run/spawn for isolated TypeScript programs that may loop using input, program.sleep, program.emit, and exact requires capabilities. run/wait return terminal envelopes (join aliases wait for both agents and Jev); inspect state and result/error. Background programs are session-owned; jev.status and jev.stop inspect/cancel them. For Main-turn advisors, spawn with observe, await program.nextEvent without polling, and opt into bounded context fields. program.advise requires jev.advise and explicit delivery; default is record-only. Return the observer ID without waiting in Main; Escape/Main abort cancels observers. Use /login jev, TYPESAFE_API_KEY, /login openrouter, OPENROUTER_API_KEY, /login vercel-ai-gateway, AI_GATEWAY_API_KEY, or a trusted credentialCommand. Credentials stay host-side; status never retrieves a key. See docs/jev.md for schemas, budgets, and browser integration.",
+            content: "Jev supplies typed Choice, Noul, and Score judgments, not generated text. Prefer shell-first orchestration: granted pi.bash runs existing CLIs; tasks.wait/watch await bounded receipts/monitor batches without polling or inference. Use UI-only monitors to avoid Main wakeups. Browser/macOS tools need no Fabric bridge. Code owns commands; never execute a model answer as shell source. Omit jev.evaluate and set maxEvaluations:0 for deterministic programs (host auto approvals remain independent). Use jev.evaluate only for explicit authorized batched questions; jev.run/spawn for isolated TypeScript programs that may loop using input, program.sleep, program.emit, and exact requires capabilities. run/wait return terminal envelopes (join aliases wait for both agents and Jev); inspect state and result/error. Programs and detached tasks are session-owned, not restart-durable. jev.status/stop control programs; tasks.stop separately stops their detached tasks. Observation timeout/cancellation never cancels the task; keep task IDs and finite process deadlines. For Main-turn advisors, spawn with observe, await program.nextEvent without polling, and opt into bounded context fields. program.advise requires jev.advise and explicit delivery; default is record-only. Return the observer ID without waiting in Main; Escape/Main abort cancels observers. Use /login jev, TYPESAFE_API_KEY, /login openrouter, OPENROUTER_API_KEY, /login vercel-ai-gateway, AI_GATEWAY_API_KEY, or a trusted credentialCommand. Credentials stay host-side; status never retrieves a key. See docs/jev.md for schemas, budgets, and shell/CLI composition.",
           });
           const observationHost = identity.kind === "main" ? new JevObservationHost(context.sessionManager.getSessionId(), advice => {
             this.pi.sendMessage({
@@ -1294,6 +1314,10 @@ export class FabricRuntimeState {
   async shutdown(): Promise<void> {
     this.#completionInbox?.close();
     this.#completionInbox = undefined;
+    this.#shellInbox?.close();
+    this.#shellInbox = undefined;
+    this.#shellTiming?.close();
+    this.#shellTiming = undefined;
     this.#suppressResidentGuidanceSync = true;
     await this.#deactivateRepairs();
     clearActiveCompiledSurface();
@@ -1393,6 +1417,11 @@ export class FabricRuntimeState {
   async #closeInternal(): Promise<void> {
     this.#completionInbox?.close();
     this.#completionInbox = undefined;
+    this.#shellInbox?.close();
+    this.#shellInbox = undefined;
+    this.#shellTiming?.close();
+    this.#shellTiming = undefined;
+    await this.shellJobs.close();
     await this.#deactivateRepairs();
     if (!this.#registry) return;
     await this.#participants?.quiesce().catch(() => undefined);
@@ -1410,7 +1439,6 @@ export class FabricRuntimeState {
     await this.#residency?.close();
     await this.#actors?.close();
     await this.#agents?.close();
-    await this.shellJobs.close();
     const externalNames = new Set(this.#externalProviders.keys());
     try {
       await this.#registry.close(externalNames);

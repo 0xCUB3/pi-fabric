@@ -11,6 +11,8 @@ import { truncateMiddle } from "../util.js";
 import type { FabricUiController } from "../ui/controller.js";
 import { FABRIC_CONVERSATION_SHORTCUT } from "../ui/conversation-shortcut.js";
 import { safeText } from "../ui/format.js";
+import { FabricModelSelector } from "../ui/fabric-model-selector.js";
+import { buildModelSource } from "../ui/model-picker.js";
 import {
   FABRIC_PEER_AWAIT_SETTLE_EVENT,
   FABRIC_PEER_CARDS_EVENT,
@@ -143,6 +145,25 @@ const resolvePrewalkModel = async (
       "error",
     );
     return undefined;
+  }
+  if (typeof context.ui.custom === "function") {
+    try {
+      // undefined = host can't show the dialog; { model: undefined } = user cancelled.
+      const picked = await context.ui.custom<{ model?: string | undefined } | undefined>(
+        (_tui, theme, _keybindings, done) =>
+          new FabricModelSelector({
+            theme,
+            source: buildModelSource(context.modelRegistry, resolveAgentDir()),
+            currentValue: "",
+            headerText:
+              "Prewalk executor model. Fabric hands off at the next matching mutation boundary; Main continues on the picked model.",
+            inheritRow: false,
+            onSelect: (value) => done({ model: value }),
+            onCancel: () => done({ model: undefined }),
+          }),
+      );
+      if (picked !== undefined) return picked.model;
+    } catch {}
   }
   return context.ui.select("Prewalk executor model", keys);
 };
@@ -294,12 +315,22 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
     },
   });
 
+  pi.registerShortcut?.("ctrl+alt+t", {
+    description: "Inspect Fabric background shell tasks",
+    handler: async (context) => {
+      if (context.mode !== "tui") return;
+      try { await state.ensure(context); await fabricUi.openTasks(context); }
+      catch (error) { context.ui.notify(safeText(error instanceof Error ? error.message : String(error)), "error"); }
+    },
+  });
+
   pi.registerCommand("fabric", {
-    description: "Open Fabric dashboard or chat, arm prewalk, reload, or manage agents and actors",
+    description: "Open Fabric dashboard, chat or tasks, arm prewalk, reload, or manage agents and actors",
     getArgumentCompletions: (argumentPrefix: string): AutocompleteItem[] | null => {
       const subcommands = [
         "status",
         "dashboard",
+        "tasks",
         "chat",
         "settings",
         "schema",
@@ -342,6 +373,10 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
       const subcommand = argumentPrefix.slice(0, firstSpace);
       const idPrefix = argumentPrefix.slice(firstSpace + 1);
       if (!state.initialized) return null;
+      if (subcommand === "tasks") {
+        const matches = state.shellJobs?.list().filter(job => job.id.startsWith(idPrefix)) ?? [];
+        return matches.map(job => ({ value: `tasks ${job.id}`, label: job.id.slice(0, 8), description: safeText(job.description ?? job.command).slice(0, 120) }));
+      }
       if (subcommand === "chat") {
         const snapshot = fabricUi.snapshot();
         const seen = new Set<string>();
@@ -558,6 +593,10 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
         }
         const task = argumentsText.trim().slice(command.length).trim();
         await armPrewalk(state, context, pi, task);
+        return;
+      }
+      if (command === "tasks") {
+        await fabricUi.openTasks(context, argumentsList[0]);
         return;
       }
       if (command === "chat") {
