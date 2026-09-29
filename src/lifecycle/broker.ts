@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { MeshStore, type MeshIdentity, type MeshStateEntry } from "../mesh/store.js";
-import type { FabricParticipantSource } from "../topology/types.js";
+import type { FabricParticipantInfo, FabricParticipantSource } from "../topology/types.js";
 import {
   FABRIC_LIFECYCLE_SUBSCRIPTION_PREFIX,
   FABRIC_PARTICIPANT_LIFECYCLE_TOPIC,
@@ -198,10 +198,19 @@ export class LifecycleBroker {
 
   async #drain(): Promise<void> {
     const entries = this.mesh.listAll(FABRIC_LIFECYCLE_SUBSCRIPTION_PREFIX);
+    if (entries.length === 0) return;
+    // One directory rebuild serves every subscription in this cycle. Each
+    // get() rebuilds the whole project directory from mesh state, so a
+    // per-subscription lookup costs O(subscriptions x state entries) and
+    // competes with terminal input on the main thread.
+    let directory: Map<string, FabricParticipantInfo> | undefined;
     for (const entry of entries) {
       const subscription = lifecycleSubscriptionFromValue(entry.value);
       if (!subscription || entry.key !== subscriptionKey(subscription.id)) continue;
-      const target = this.participants.get(subscription.to);
+      directory ??= new Map(
+        this.participants.list({ scope: "project" }).map((record) => [record.id, record]),
+      );
+      const target = directory.get(subscription.to) ?? this.participants.get(subscription.to);
       if (!target || target.stale || !target.local) continue;
       await this.#drainSubscription(entry, subscription);
     }
