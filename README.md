@@ -67,6 +67,8 @@ To select Python, put this in `~/.pi/agent/fabric.json` or a trusted project's `
 
 Python defaults to [Monty](https://github.com/pydantic/monty), a sandboxed Python subset with VM resource limits and no ambient filesystem, network, or process access. It is **not CPython**: arbitrary imports, third-party packages, and some Python features are unavailable. Full **CPython 3.10+** requires explicit `executor.pythonRuntime: "cpython"` and runs trusted native code with full OS privileges outside schema enforce, like TypeScript's Node/Bun escape hatches. CPython enforcement additionally requires macOS `sandbox-exec` or Linux `bwrap`, failing closed without isolation. Missing Monty dependencies never trigger a native fallback. `executor.runtime` only affects TypeScript. See [the kernel guide](docs/kernels.md).
 
+Pi's native MCP can optionally supply selected servers beneath the same Fabric API: set `mcp.nativeServers` to exact server names already configured in Pi. Other servers stay on mcporter; failed native calls never switch transports. See [MCP ownership and compatibility](docs/configuration.md#opt-in-pi-owned-servers).
+
 ## Install
 
 Requires Node.js 24+ and Pi 0.99.0+. Monty's optional native package installs on supported platforms; only the explicit CPython escape hatch requires CPython 3.10+. Fabric warns when a detectable host is older than the required native loadout and nested-execution contracts.

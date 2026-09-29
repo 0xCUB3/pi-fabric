@@ -153,7 +153,12 @@ export const createFabricExecTool = (
     name: "fabric_exec",
     // Native codemode-only hides direct tools. An orchestrator must stay model-only.
     exposure: "model-only",
-    prepareLoadout: (loadout) => fabricToolLoadout(loadout, state.config.fullCodeMode || state.config.schema.mode === "enforce"),
+    prepareLoadout: (loadout) => {
+      // SDK/CLI reload rebuilds the registry before session_start bootstraps
+      // the replacement extension. That transient loadout is not a request.
+      if (!state.bootstrapped) return undefined;
+      return fabricToolLoadout(loadout, state.config.fullCodeMode || state.config.schema.mode === "enforce");
+    },
     label: "Fabric",
     description: python
       ? monty

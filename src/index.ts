@@ -11,6 +11,7 @@ import {
 } from "./ui/code-preview-shell.js";
 import { registerFabricActorHostEventObservers } from "./actors/host-event-observer.js";
 import { CapturedToolCatalog } from "./capture/catalog.js";
+import { isSelectedNativeMcpTool } from "./core/native-mcp-identity.js";
 import { installRegisteredToolCapture } from "./capture/interceptor.js";
 import { registerFabricCommand } from "./commands/fabric.js";
 import { resolveAgentDir } from "./core/agent-dir.js";
@@ -875,7 +876,9 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
       ? coreOverridePromptGuidance(capturedTools).trim()
       : undefined;
     const extensionRoster = effectiveFullCodeMode
-      ? extensionToolRosterGuidance(capturedTools.list(), new Set(PI_CORE_TOOL_NAMES))
+      ? extensionToolRosterGuidance(capturedTools.list().filter(entry =>
+          !state.config.mcp.enabled || !isSelectedNativeMcpTool(entry.definition, state.config.mcp.nativeServers),
+        ), new Set(PI_CORE_TOOL_NAMES))
       : undefined;
     // Only turn-stable sections go into the system prompt. Anything derived
     // from the current prompt (skill references) rides

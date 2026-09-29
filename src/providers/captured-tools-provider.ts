@@ -98,14 +98,19 @@ export class CapturedToolsProvider implements FabricProvider {
   readonly #scheduler = new CapturedToolScheduler();
   readonly #allowedTools = readChildToolAllowlist();
 
-  constructor(readonly catalog: CapturedToolCatalog) {}
+  constructor(
+    readonly catalog: CapturedToolCatalog,
+    private readonly omitFromDiscovery: (entry: CapturedToolEntry) => boolean = () => false,
+  ) {}
 
   async list(
     request: FabricProviderListRequest,
     _context: FabricInvocationContext,
   ): Promise<FabricActionDescriptor[]> {
     const query = request.query?.trim().toLowerCase();
-    const descriptors = this.catalog.list().filter((entry) => !this.#allowedTools || this.#allowedTools.has(entry.name)).map(descriptorFrom);
+    const descriptors = this.catalog.list().filter((entry) =>
+      (!this.#allowedTools || this.#allowedTools.has(entry.name)) && !this.omitFromDiscovery(entry),
+    ).map(descriptorFrom);
     if (!query) return descriptors;
     return descriptors.filter((descriptor) =>
       `${descriptor.name} ${descriptor.description} ${descriptor.namespace ?? ""}`

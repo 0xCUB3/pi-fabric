@@ -396,6 +396,7 @@ export class FabricRuntimeState {
     this.#unsubscribeCapturedCatalog?.();
     this.#unsubscribeCapturedCatalog = this.capturedTools.subscribe(() => {
       this.#registry?.notifyCatalogChanged("extensions");
+      if (this.#config?.mcp.nativeServers?.length) this.#registry?.notifyCatalogChanged("mcp");
       this.#refreshRepairCatalog();
     });
     this.#componentSupervisor = new FabricComponentSupervisor(this.#registry, {

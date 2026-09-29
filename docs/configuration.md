@@ -494,7 +494,28 @@ See [agents, actors & mesh](agents.md) for the runner and transport details.
 
 ## MCP
 
-- `mcp.disableOAuth`: when true, MCP calls can use cached credentials. New interactive OAuth flows stay disabled.
+### Opt-in Pi-owned servers
+
+By default Fabric still uses mcporter. To borrow specific servers already configured in Pi's `mcp.json`, set exact server names in Fabric configuration, or use **/fabric settings → MCP → Pi-owned servers**:
+
+```json
+{ "mcp": { "nativeServers": ["github", "project-docs"] } }
+```
+
+Run `/fabric reload` after changing this selection. Configuring or enabling a native server itself remains Pi's job (`/mcp`, `pi mcp`, and `/reload`). SDK hosts must supply Pi's `createMcpExtension()` and bind extensions; Fabric does not install it or start another native client. No existing MCP configuration or credentials are migrated. An empty list restores the default ownership.
+
+Selected servers keep Fabric's `mcp.<server>.<tool>` names, sanitizer aliases, discovery, static argument checking, normalized `{ text, content, structuredContent }` results, and `display: { name, description }` execution metadata. Raw MCP identity comes from Pi's namespace/label metadata, not its potentially hashed tool identifier. Tool descriptions and input schemas come from the live native registration; Pi's `CallToolResult` output-schema envelope is unwrapped. Genuine schema differences invalidate old normal-form plans rather than being concealed. Other servers keep the existing mcporter behavior. Selected tools are advertised once under `mcp.*`; existing `extensions.mcp__...` references remain callable when extension capture is enabled, but are not repeated in discovery or the extension roster.
+
+Both Fabric policy and Pi's tool middleware apply. Native redactions, progress, nested usage and cancellation remain authoritative; one Fabric invocation emits one Fabric trace operation. Read-only MCP annotations do not change Fabric's conservative network risk. Pi-owned tools remain subject to hidden/deferred exposure and child tool allowlists. A missing, withdrawn, blocked or failed native tool never falls back to mcporter, even if mcporter has a server with the same name. Fabric does not connect or revalidate that duplicate. Ambiguous sanitized names require exact names via `mcp.call` (an exact legacy server name retains precedence over a native alias). Resolving a native server alias may load mcporter's configuration names to check ambiguity, but does not connect those servers.
+
+Fabric still owns its call deadline. Reload/shutdown cancels its borrowed calls without disconnecting Pi's shared servers. `mcp.servers()` includes selected native servers with `transport: "pi"` (an ownership marker, not a wire protocol), tool counts, and `stale: true` when no callable tools are currently registered. `mcp.reload()` only reloads mcporter; it does not reconnect Pi servers. `mcp.register()` cannot replace a Pi-owned name. Native resource tools remain on Pi's existing captured surface; they are not renamed into per-server tool namespaces.
+
+Pi owns native startup connections and OAuth; this option does not make Pi's own session-start connections lazy. Fabric adds no connection work to registration or idle hooks. Use `/mcp login` for native authentication. To prevent *Pi itself* from also connecting a legacy-owned server, disable/remove its entry in Pi's MCP configuration; Fabric never changes that user setting.
+
+### mcporter and shared options
+
+- `mcp.nativeServers`: exact Pi-owned server names, default `[]`. Invalid selections fail rather than silently changing ownership.
+- `mcp.disableOAuth`: for mcporter, calls may use cached credentials but cannot launch new interactive OAuth flows. Pi-owned servers use Pi's authentication settings instead.
 - `mcp.callTimeoutMs`: per-call timeout bound.
 - `mcp.allowDynamicServers`: permit `mcp.register()` of ephemeral servers.
 - `mcp.enabled`: set to `false` to disable the MCP surface.

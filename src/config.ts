@@ -111,8 +111,19 @@ export interface FabricMcpJevConfig {
   semanticMinProbability: number;
 }
 
+const nativeMcpServersValue = (value: unknown): string[] => {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 256 || value.some(name =>
+    typeof name !== "string" || !/^[A-Za-z0-9_-]+$/.test(name.trim()))) {
+    throw new Error("mcp.nativeServers must be an array of at most 256 exact Pi MCP server names (letters, digits, _ and -)");
+  }
+  return [...new Set(value.map((name: string) => name.trim()))];
+};
+
 export interface FabricMcpConfig {
   enabled: boolean;
+  /** Opt-in exact server names owned by Pi, never mcporter fallback targets. */
+  nativeServers?: string[];
   configPath?: string;
   disableOAuth: boolean;
   allowDynamicServers: boolean;
@@ -410,6 +421,7 @@ export const DEFAULT_FABRIC_CONFIG: FabricConfig = {
   },
   mcp: {
     enabled: true,
+    nativeServers: [],
     disableOAuth: true,
     allowDynamicServers: true,
     callTimeoutMs: 120_000,
@@ -966,6 +978,7 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
     },
     mcp: {
       enabled: booleanValue(mcp.enabled, DEFAULT_FABRIC_CONFIG.mcp.enabled),
+      nativeServers: nativeMcpServersValue(mcp.nativeServers),
       ...(configPath ? { configPath } : {}),
       disableOAuth: booleanValue(mcp.disableOAuth, DEFAULT_FABRIC_CONFIG.mcp.disableOAuth),
       allowDynamicServers: booleanValue(
@@ -1589,6 +1602,9 @@ export const saveFabricConfig = (
   const input = readJsonObjectFile(targetPath);
   const existing = migrateFabricConfigDocument(input?.document ?? {}).document;
   const merged = mergeObjects(existing, partial) as Record<string, unknown>;
+  // Reject invalid ownership before the settings UI replaces a working file.
+  // Do not normalize the whole document: saved layers must remain sparse.
+  nativeMcpServersValue(objectValue(merged.mcp).nativeServers);
   // Never stamp down: preserve version markers written by newer builds.
   merged.configVersion = Math.max(
     typeof merged.configVersion === "number" ? merged.configVersion : 0,

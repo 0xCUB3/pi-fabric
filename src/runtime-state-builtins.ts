@@ -10,6 +10,8 @@ import type { ParticipantDirectory } from "./topology/participant-directory.js";
 import { CapturedToolsProvider } from "./providers/captured-tools-provider.js";
 import { McpDescriptorCacheStore, mcpDescriptorCachePath } from "./providers/mcp-descriptor-cache.js";
 import { McpProvider } from "./providers/mcp-provider.js";
+import { PiNativeMcpTools } from "./providers/pi-native-mcp.js";
+import { isSelectedNativeMcpTool } from "./core/native-mcp-identity.js";
 import type { MemoryProviderContext } from "./providers/memory-provider.js";
 import { WorkerMemoryProvider } from "./memory/worker-provider.js";
 import { MeshProvider } from "./providers/mesh-provider.js";
@@ -53,7 +55,7 @@ export class RuntimeStateBuiltins {
     // namespace in enforce mode.
     const capturedToolsProvider =
       effectiveFullCodeMode && (config.capture.enabled || enforceSchema)
-        ? new CapturedToolsProvider(capturedTools)
+        ? new CapturedToolsProvider(capturedTools, entry => config.mcp.enabled && isSelectedNativeMcpTool(entry.definition, config.mcp.nativeServers))
         : undefined;
     if (effectiveFullCodeMode) {
       await this.install(createProviderComponent({
@@ -91,6 +93,9 @@ export class RuntimeStateBuiltins {
       provider: "mcp",
       description: "MCP runtime and descriptor cache",
       create: () => new McpProvider(cwd, config.mcp, {
+        ...(config.mcp.nativeServers?.length
+          ? { native: new PiNativeMcpTools(capturedTools, config.mcp.nativeServers, config.mcp.callTimeoutMs) }
+          : {}),
         ...(config.mcp.cache.enabled
           ? {
               cache: new McpDescriptorCacheStore(mcpDescriptorCachePath(cwd)),

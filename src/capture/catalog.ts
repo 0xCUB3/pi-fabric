@@ -15,6 +15,7 @@ export interface CapturedToolEntry {
 
 export class CapturedToolCatalog {
   readonly #tools = new Map<string, CapturedToolEntry>();
+  #registered: RegisteredTool[] = [];
   readonly #listeners = new Set<() => void>();
   // The ExtensionRunner observed during the last tool refresh. Stored even
   // when capture is disabled so PiToolsProvider can replay the tool-execution
@@ -51,6 +52,9 @@ export class CapturedToolCatalog {
   ): void {
     // Always remember the runner (see field comment) before the enabled gate.
     this.#runner = runner;
+    // Metadata observation is independent of exposing extensions.*. Native MCP
+    // opt-in also works when full code mode or extension capture is disabled.
+    this.#registered = [...registeredTools];
     this.#tools.clear();
     if (!config.enabled) {
       // A replace under a disabled policy keeps the suspension flag: during
@@ -86,6 +90,7 @@ export class CapturedToolCatalog {
   }
 
   clear(): void {
+    this.#registered = [];
     this.#tools.clear();
     this.#emit();
   }
@@ -102,6 +107,10 @@ export class CapturedToolCatalog {
   subscribe(listener: () => void): () => void {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
+  }
+
+  registeredTools(): readonly RegisteredTool[] {
+    return this.#suspended ? [] : this.#registered;
   }
 
   get(name: string): CapturedToolEntry | undefined {

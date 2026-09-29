@@ -860,6 +860,26 @@ describe("Fabric configuration", () => {
   });
 });
 
+describe("native MCP ownership configuration", () => {
+  it("rejects invalid settings before replacing the working configuration", () => {
+    const directory = temporaryDirectory();
+    const location = { cwd: directory, agentDir: directory, projectTrusted: false };
+    const saved = saveFabricConfig(location, { mcp: { nativeServers: ["docs"] } });
+    const before = fs.readFileSync(saved.path, "utf8");
+    expect(() => saveFabricConfig(location, { mcp: { nativeServers: ["bad.name"] } })).toThrow("mcp.nativeServers");
+    expect(fs.readFileSync(saved.path, "utf8")).toBe(before);
+    expect(loadFabricConfig(location).mcp.nativeServers).toEqual(["docs"]);
+  });
+
+  it("is opt-in, deduplicates exact names, and rejects malformed selections rather than falling back", () => {
+    expect(normalizeFabricConfig({}).mcp.nativeServers).toEqual([]);
+    expect(normalizeFabricConfig({ mcp: { nativeServers: [" docs-api ", "docs-api", "issues"] } }).mcp.nativeServers).toEqual(["docs-api", "issues"]);
+    for (const nativeServers of ["docs", ["bad.name"], [1], [""], ["*"]]) {
+      expect(() => normalizeFabricConfig({ mcp: { nativeServers } })).toThrow("mcp.nativeServers");
+    }
+  });
+});
+
 describe("MCP descriptor cache configuration", () => {
   it("defaults to an enabled cache with changed revalidation", () => {
     const config = normalizeFabricConfig({});
