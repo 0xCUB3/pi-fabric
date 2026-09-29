@@ -33,7 +33,7 @@ Known calls also work in the Python kernels, for example `await cache.status(tar
 - `durationMs` is required: an integer from 1,000 to 1,800,000. At most 128 Fabric holds can coexist in one provider generation. Deadlines never auto-renew, and refreshes do not extend them.
 - Optional `maxRefreshes` (integer 1–1,000) and `maxCostUsd` (positive, at most 1,000) are fail-closed requests: **the current adapter returns unsupported when either is supplied**. The proposed native lease API has no admission/receipt contract that can enforce them. Do not infer a spending cap from the deadline, usage counters, or Fabric's agent budgets.
 - Releasing an unknown or previously released session hold returns `released: false`. Cleanup errors are explicit. Release cannot undo already-billed refreshes or stop another native owner's interest.
-- Holds end on their deadline, cancellation during allocation, known session/model/branch/compaction boundaries, or provider close. Reload drains retained provider generations rather than instantly revoking their committed views. A successful completed invocation detaches its operation signal; its hold remains session-owned. Abrupt host death ends the in-process native warmer. Holds are never persisted or restored.
+- Holds end on their deadline, cancellation during allocation, known session/model/branch/compaction boundaries, or provider close. Reload drains retained provider generations without instantly revoking their committed views. A successful completed invocation detaches its operation signal; its hold remains session-owned. Abrupt host death ends the in-process native warmer. Holds are never persisted or restored.
 - Warming decisions and subsequent holds fence changed model, thinking, system prompt, and active tool names. Native Pi remains responsible for exact serialized-request validity, including transformations by other extensions. Failed native acquisition is not retried automatically on an unchanged binding.
 - Status is read-only. It neither acquires nor releases interest, returns no prompt text, and makes no inference request. Invalidation is driven by lifecycle hooks, acquisition checks, and the native decision boundary.
 
@@ -71,7 +71,7 @@ Import `FabricCacheHoldResult` as a type from `pi-fabric/protocol`. Inspect its 
 
 Stable prompt construction already lives in [model-guidance components](components.md#prompt-cache-and-cold-prefill-behavior). Do not inject clocks, task state, or cache diagnostics into the stable prefix.
 
-Persistent actor transcripts are not persistent Pi worker processes: current actor activations reuse the session file but close the Pi child after settlement. Idle actor warming needs a separately designed live-runtime retention capability; this change does not keep children alive, alter durable residency, or route cache control across participants.
+Persistent actor transcripts differ from persistent Pi worker processes: current actor activations reuse the session file and close the Pi child after settlement. Idle actor warming needs a separately designed live-runtime retention capability; this change does not keep children alive, alter durable residency, or route cache control across participants.
 
 A future native bounded-admission protocol would be needed before enabling refresh-count or cost-limited holds. Live-provider qualification is also separate from deterministic tests against the optional capability contract.
 

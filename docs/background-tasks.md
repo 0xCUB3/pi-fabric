@@ -41,7 +41,7 @@ path, credentials, or model message is included. Acknowledgements and output
 monitor batches do not change timing, and UI-only jobs are included.
 
 Consumers must filter by session, deduplicate task transitions, and union these
-intervals with foreground tool calls rather than adding full job durations to
+intervals with foreground tool calls without adding full job durations to
 already-metered calls. pi-ledger records only the additional background union as
 agent tool time, including between turns. No polling, model wakeup, or new setting
 is involved. Shutdown/reload closes live spans; processes and clocks are not
