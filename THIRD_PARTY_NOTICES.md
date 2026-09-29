@@ -1,9 +1,9 @@
 # Third-party notices
 
-## Bend 2.0.32
+## Bend 2.0.34
 
 The generated policy kernel includes Bend's emitted JavaScript trampoline and
-compiled Base primitives from [Bend 2.0.32](https://github.com/bendlang/bend/tree/v2.0.32),
+compiled Base primitives from [Bend 2.0.34](https://github.com/bendlang/bend/tree/v2.0.34),
 Copyright 2026 HigherOrderCO, licensed under Apache-2.0. Pi Fabric selects the
 ABI library exports, adapts constructor tags at the boundary, and tree-shakes
 unused runtime code.
