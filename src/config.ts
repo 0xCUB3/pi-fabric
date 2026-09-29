@@ -53,6 +53,12 @@ interface FabricExecutorConfig {
   kernel: FabricKernel;
   pythonRuntime: FabricPythonRuntime;
   cpython: { binary: string };
+  /** Optional jev-fabric backend for durable tasks and sessions (macOS/Linux).
+   * `binary` empty or "auto" picks the user's compatible install outside the
+   * workspace, then the bundled package; an explicit path never falls back.
+   * `home` empty means JEV_FABRIC_HOME, else `<cwd>/.jev-fabric-native`, the
+   * same store other harnesses share. `timeoutMs` is the default job lifetime. */
+  jevFabric: { binary: string; home: string; timeoutMs: number };
   /** TypeScript backend only; ignored by the Python kernel. */
   runtime: FabricExecutorRuntime;
   timeoutMs: number;
@@ -384,6 +390,7 @@ export const DEFAULT_FABRIC_CONFIG: FabricConfig = {
     kernel: "typescript",
     pythonRuntime: "monty",
     cpython: { binary: "python3" },
+    jevFabric: { binary: "", home: "", timeoutMs: 3_600_000 },
     runtime: "quickjs",
     timeoutMs: 120_000,
     maxTimeoutMs: 900_000,
@@ -753,6 +760,7 @@ const memorySourcesValue = (value: unknown): FabricMemorySourceConfig[] | undefi
 export const normalizeFabricConfig = (input: Record<string, unknown>): FabricConfig => {
   const executor = objectValue(input.executor);
   const cpython = objectValue(executor.cpython);
+  const jevFabric = objectValue(executor.jevFabric);
   const executorKernel = executorKernelValue(executor.kernel, DEFAULT_FABRIC_CONFIG.executor.kernel);
   const executorMaxTimeoutMs = boundedInteger(
     executor.maxTimeoutMs,
@@ -889,6 +897,11 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
       pythonRuntime: executor.pythonRuntime === "cpython" ? "cpython" : "monty",
       cpython: {
         binary: stringValue(cpython.binary)?.trim() ?? DEFAULT_FABRIC_CONFIG.executor.cpython.binary,
+      },
+      jevFabric: {
+        binary: stringValue(jevFabric.binary)?.trim() ?? DEFAULT_FABRIC_CONFIG.executor.jevFabric.binary,
+        home: stringValue(jevFabric.home)?.trim() ?? "",
+        timeoutMs: boundedInteger(jevFabric.timeoutMs, DEFAULT_FABRIC_CONFIG.executor.jevFabric.timeoutMs, 1_000, MAX_EXECUTOR_TIMEOUT_MS),
       },
       runtime: executorRuntime,
       maxTimeoutMs: boundedInteger(

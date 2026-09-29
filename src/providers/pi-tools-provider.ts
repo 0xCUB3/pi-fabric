@@ -73,6 +73,14 @@ const closedPiInputSchema = (name: PiCoreToolName, source: unknown): Record<stri
         "Detach immediately: returns ok:true with taskId, pid and a bounded live log. Completion notifies the owning agent. Inspect/stop with tools.call tasks.get/tasks.stop; bounded controllers can await tasks.wait/tasks.watch without polling. monitor also detaches, requires explicit ui/wake delivery and has a finite deadline. Do not poll.",
     };
   }
+  // jev-fabric is macOS/Linux only: Windows never advertises durable tasks.
+  if (name === "bash" && process.platform !== "win32") {
+    properties.durable = {
+      type: "boolean",
+      description:
+        "Run as a durable background task owned by jev-fabric (the user's install or the bundled package). It keeps running if Pi exits and reattaches to this session on resume; other harnesses sharing the store can see it. Implies background. Use for dev servers and long jobs that must outlive the session; stop explicitly with tasks.stop.",
+    };
+  }
   if (name === "edit") {
     properties.all = { type: "boolean", description: "Apply every replacement to all matching occurrences." };
     const edits = properties.edits as Record<string, unknown> | undefined;
@@ -443,16 +451,21 @@ export class PiToolsProvider implements FabricProvider {
     return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : DEFAULT_SHELL_HANG_MS;
   }
 
-  #trackedShellDefinition(
+  async #trackedShellDefinition(
     name: "bash" | "powershell",
     args: Record<string, unknown>,
     job: ReturnType<FabricShellJobStore["begin"]>,
     middleware: FabricBashMiddlewareV1 | undefined,
-  ): ToolDefinition<any, any, any> {
+  ): Promise<ToolDefinition<any, any, any>> {
     const cwd = typeof args[PI_BASH_CWD_KEY] === "string" ? args[PI_BASH_CWD_KEY] : this.#cwd;
     if (name === "bash") {
       const options = middleware?.options;
-      const local = createLocalBashOperations(options?.shellPath !== undefined ? { shellPath: options.shellPath } : undefined);
+      const local = job.durable
+        ? await this.#shellJobs.durable!.launch(job, {
+            shellPath: options?.shellPath, label: job.options.description, filtered: middleware !== undefined,
+            command: typeof args.command === "string" ? args.command : "", cwd, ownerId: job.options.ownerId,
+          })
+        : createLocalBashOperations(options?.shellPath !== undefined ? { shellPath: options.shellPath } : undefined);
       const operations = middleware ? middleware.wrapOperations(local) : local;
       if (!operations || typeof operations.exec !== "function") {
         throw new Error("Invalid Fabric bash middleware operations; refusing to bypass shell protection");
@@ -506,9 +519,16 @@ export class PiToolsProvider implements FabricProvider {
     const monitor = parseShellMonitor(args.monitor);
     if (monitor && args.background === false) throw new Error("monitor runs in the background; omit background:false");
     if (monitor && this.#shellJobs.live().filter(job => job.options.monitor).length >= 8) throw new Error("At most 8 monitors may run per session; stop an existing task first");
-    const background = args.background === true || monitor !== undefined;
-    const { background: _background, monitor: _monitor, description: _description, ...executeArgs } = args;
+    const durable = args.durable === true;
+    if (durable) {
+      if (name !== "bash") throw new Error("durable is available for pi.bash only");
+      if (args.background === false) throw new Error("durable runs in the background; omit background:false");
+      if (process.platform === "win32" || !this.#shellJobs.durable) throw new Error("Durable shell tasks need jev-fabric on macOS or Linux in a Fabric full-code session");
+    }
+    const background = args.background === true || monitor !== undefined || durable;
+    const { background: _background, monitor: _monitor, description: _description, durable: _durable, ...executeArgs } = args;
     const job = this.#shellJobs.begin(name, command, {
+      ...(durable ? { durable: { home: this.#shellJobs.durable!.home } } : {}),
       cwd: typeof args[PI_BASH_CWD_KEY] === "string" ? args[PI_BASH_CWD_KEY] : this.#cwd,
       ownerId: context.extensionContext.sessionManager?.getSessionId?.(),
       ...(typeof args.description === "string" ? { description: args.description } : {}),
@@ -516,7 +536,7 @@ export class PiToolsProvider implements FabricProvider {
     });
     let tool: ToolDefinition<any, any, any>;
     try {
-      tool = this.#trackedShellDefinition(name, executeArgs, job, middleware);
+      tool = await this.#trackedShellDefinition(name, executeArgs, job, middleware);
     } catch (error) {
       await job.finish(null);
       throw error;
@@ -557,7 +577,8 @@ export class PiToolsProvider implements FabricProvider {
       logPath,
       ...(pid !== undefined ? { pid } : {}),
     });
-    const output = appendShellHangNotice(job.snapshotText(), `${notice}\n[Task ${job.id}; /fabric tasks or tools.call({ref:"tasks.get",args:{id:"${job.id}"}}). ${monitor?.delivery === "ui" ? "UI-only monitor: will not wake the agent." : "Completion will notify this session; do not poll."}]`);
+    const durableNotice = job.durable ? ` Durable: owned by the jev-fabric store at ${job.durable.home}; it keeps running if Pi exits and reattaches to this session on resume. Stop it explicitly with tasks.stop when no longer needed.` : "";
+    const output = appendShellHangNotice(job.snapshotText(), `${notice}\n[Task ${job.id}; /fabric tasks or tools.call({ref:"tasks.get",args:{id:"${job.id}"}}). ${monitor?.delivery === "ui" ? "UI-only monitor: will not wake the agent." : "Completion will notify this session; do not poll."}${durableNotice}]`);
     context.update(`${name}: still running after ${Math.max(1, Math.round(elapsedMs / 1000))}s`);
     return {
       content: [{ type: "text", text: output }],
@@ -594,6 +615,7 @@ export class PiToolsProvider implements FabricProvider {
     // CapturedToolsProvider, so delegate to it unchanged.
     if (this.#catalog?.get(name) && !middleware) {
       if (isPiShellToolName(name) && args.monitor !== undefined) throw new Error("Shell monitors are unavailable for opaque shell overrides; a Fabric-compatible middleware adapter is required");
+      if (isPiShellToolName(name) && args.durable !== undefined) throw new Error("Durable shell tasks are unavailable for opaque shell overrides; a Fabric-compatible middleware adapter is required");
       const result = await this.#capturedTools!.invoke(name, args, context);
       this.#attachReadMedia(name, result, context);
       this.#attachReadNote(name, result, context);

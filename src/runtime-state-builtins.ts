@@ -16,6 +16,7 @@ import { MeshProvider } from "./providers/mesh-provider.js";
 import { PiToolsProvider } from "./providers/pi-tools-provider.js";
 import { powerShellToolDefinitionFactory } from "./providers/pi-bash-cwd.js";
 import type { FabricShellJobStore } from "./core/shell-jobs.js";
+import { SessionsProvider } from "./providers/sessions-provider.js";
 import { TasksProvider } from "./providers/tasks-provider.js";
 import { StateProvider } from "./providers/state-provider.js";
 
@@ -23,6 +24,8 @@ import type { FabricManagedHost } from "./managed-host.js";
 
 /** Built-in provider recipes and policy; the runtime chooses installation order. */
 export class RuntimeStateBuiltins {
+  /** Installed only with a jev-fabric bridge: off Windows, outside managed hosts. */
+  #sessions = false;
   constructor(
     private readonly manifest: FabricProviderComponentManifest,
     private readonly registry: ActionRegistry,
@@ -74,6 +77,15 @@ export class RuntimeStateBuiltins {
         provider: "tasks", description: "Session-owned shell tasks and monitors",
         create: () => new TasksProvider(shell.jobs),
       }));
+      // Interactive children need jev-fabric, which exists only off Windows and outside managed hosts.
+      const durable = shell.jobs.durable;
+      if (durable) {
+        this.#sessions = true;
+        await this.install(createProviderComponent({
+          provider: "sessions", description: "Interactive jev-fabric children: open, write, read, wait and stop",
+          create: () => new SessionsProvider(durable, { cwd, shellOverride: () => capturedTools.get("bash") !== undefined }),
+        }));
+      }
     }
     await this.install(createProviderComponent({
       provider: "mcp",
@@ -167,6 +179,7 @@ export class RuntimeStateBuiltins {
   assertActive(config: FabricConfig): void {
     const expectedBuiltinProviders = new Set<string>([
       ...(config.fullCodeMode || config.schema.mode === "enforce" ? ["pi", ...(!this.managedHost ? ["tasks"] : [])] : []),
+      ...(this.#sessions ? ["sessions"] : []),
       ...(config.fullCodeMode && config.capture.enabled && config.schema.mode !== "enforce" ? ["extensions"] : []),
       "mcp",
       ...(config.mesh.enabled ? ["mesh", "state"] : ["mesh", "state"].filter((name) => this.managedHost?.has(name))),

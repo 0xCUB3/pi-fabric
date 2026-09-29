@@ -179,6 +179,8 @@ export class FabricUiController {
     if (this.ownsInput) return;
     const jobs = this.state.shellJobs;
     if (!jobs) { context.ui.notify("No shell task store in this session", "info"); return; }
+    // Input ownership is claimed synchronously; reattached tasks arrive as store events.
+    void jobs.durable?.resume();
     const candidates = query ? jobs.list().filter(job => job.id === query || job.id.startsWith(query)) : [];
     if (query && candidates.length !== 1) { context.ui.notify("Task ID is unknown or ambiguous", "warning"); return; }
     if (context.mode !== "tui") {

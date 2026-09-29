@@ -2,7 +2,7 @@
 
 Fabric follows the shell-first model of `jev-fabric`: ordinary code launches and supervises processes, consumes bounded evidence, and calls Jev **explicitly** only for a fuzzy decision. Exact checks need no model. Jev returns Choice, Noul, or Score values, never generated shell commands or prose.
 
-Programs run in persistent QuickJS contexts with exact granted capabilities. Use the existing `pi.bash` / `pi.powershell` and `tasks` provider, not a new process engine or browser/macOS bridge. No standalone `jev-fabric` installation is required. Unlike its native supervisor, Fabric programs and tasks are session-owned, not restart-durable.
+Programs run in persistent QuickJS contexts with exact granted capabilities. Use the existing `pi.bash` / `pi.powershell` and `tasks` provider, not a new process engine or browser/macOS bridge. No standalone `jev-fabric` installation is required. Fabric programs and ordinary tasks are session-owned, not restart-durable; `pi.bash({durable: true})` delegates one process to a jev-fabric store so it outlives Pi (see [durable tasks](background-tasks.md#durable-tasks-through-jev-fabric)).
 
 For guided authoring, invoke `/skill:fabric-jev <task>`. It is user-opt-in and available in both kernel skill trees. Python callers use `tools.call` dictionaries; the Jev program artifact itself remains TypeScript in QuickJS, without changing the outer Fabric kernel. See [skills](skills.md).
 
@@ -40,11 +40,11 @@ return {id:run.id, state:run.state, result:run.result ?? null, error:run.error ?
 
 `maxEvaluations: 0` rejects program inference before dispatch, even if accidentally granted. Omit `jev.evaluate` entirely for deterministic programs; they need no credentials. This does not disable a separately configured host auto-approval classifier or inference in a shell command: do not change approval policy implicitly.
 
-For filtered progress, launch with `monitor:{delivery:"ui",match:"BUILD:",intervalMs:1000,timeoutMs:60000}` and grant `tasks.watch`. Await `tools.call({ref:"tasks.watch",args:{id,after:cursor,timeoutMs:5000}})`, beginning with cursor 0. Consume `lines`, inspect `omitted`, and advance to `nextCursor`. `reason` is `event`, `finished`, or `timeout`. A match is evidence, not completion; an omitted batch is incomplete evidence. No automatic Jev calls or Main wakeups occur with UI-only delivery. See [task wait/watch](background-tasks.md#programmatic-wait-and-watch) for bounds and cancellation.
+For filtered progress, launch with `monitor:{delivery:"ui",match:"BUILD:",intervalMs:1000,timeoutMs:60000}` and grant `tasks.watch`. Await `tools.call({ref:"tasks.watch",args:{id,after:cursor,timeoutMs:5000}})`, beginning with cursor 0. Consume `lines`, inspect `losses`/`omitted`, advance to `nextCursor`, and call again at once while `more` is true. `reason` is `event`, `finished`, or `timeout`. A match is evidence, not completion; an omitted batch is incomplete evidence. No automatic Jev calls or Main wakeups occur with UI-only delivery. See [task wait/watch](background-tasks.md#programmatic-wait-and-watch) for bounds and cancellation.
 
-Timeouts are ceilings, not delays: ready evidence returns immediately. `tasks.wait`/`watch` timing out or being cancelled never stops the task. Detached tasks belong to the Pi session, **not the Jev run**: `jev.stop` stops the program, while `tasks.stop` stops its task. Keep task IDs in progress events and configure finite shell/monitor deadlines. A foreground shell still follows caller cancellation until it detaches. For work that must outlive Pi itself, use an explicitly authorized standalone supervisor; Fabric does not claim durable recovery.
+Timeouts are ceilings, not delays: ready evidence returns immediately. `tasks.wait`/`watch` timing out or being cancelled never stops the task. Detached tasks belong to the Pi session, **not the Jev run**: `jev.stop` stops the program, while `tasks.stop` stops its task. Keep task IDs in progress events and configure finite shell/monitor deadlines. A foreground shell still follows caller cancellation until it detaches. For work that must outlive Pi itself, use `durable: true` with an installed jev-fabric: the process survives, while the Jev program and its pending waits do not.
 
-Shell execution retains Fabric approvals, compatible shell middleware, and capability checks. It requires full-code mode and cannot silently replace an opaque captured shell backend. `pi.bash` accepts shell source, not literal argv or an interactive stdin handle. Use a reviewed script/file for quoting-sensitive arguments, pipes, or persistent subprocess I/O; bounded task previews are not a protocol transport.
+Shell execution retains Fabric approvals, compatible shell middleware, and capability checks. It requires full-code mode and cannot silently replace an opaque captured shell backend. `pi.bash` accepts shell source, not literal argv or an interactive stdin handle. For literal argv or persistent subprocess I/O, grant `sessions.open`/`sessions.write`/`sessions.read` (jev-fabric, macOS/Linux): the session child ends with the program. See [shell composition](shell-composition.md) for the verbs, records and a realtime loop.
 
 ## Authentication
 
@@ -191,6 +191,10 @@ A realtime controller is one program: observe, judge, act, pace, repeat. Two dec
 - **Factorized control axes.** One request asks several independent questions whose answers execute together, for example movement / view / trigger / interaction. This is the shape of the browser-native Doom example.
 
 Both are ordinary `jev.evaluate` batches: keep independent questions in one request, and keep the mapping from answers to effects in code. A counterfactual head that is not executed is still a judgment; never let unused heads write state.
+
+### Persistent children
+
+When observation or control goes through a long-lived process (a game bridge, a harness `serve`, a REPL), open it with `sessions.open` and exchange lines with `sessions.write` and `sessions.read` (long-poll `waitMs`, byte `offset`/`next`). A write reaches the child's stdin at once; a session child ends when the program ends. [Shell composition](shell-composition.md#a-realtime-loop) has a complete controller.
 
 ### Observation stays structured state
 

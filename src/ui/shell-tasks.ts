@@ -182,6 +182,7 @@ export class ShellTasksView implements Component {
       theme.fg("muted", `cwd: ${safeText(job.cwd ?? "unknown")}`),
       theme.fg("dim", `Log: ${safeText(job.logPath ?? "available after backgrounding")}`),
     ];
+    if (job.durable) meta.push(theme.fg("muted", `Durable: jev-fabric ${job.durable.jobId ? `job ${safeText(job.durable.jobId)}` : "job starting"}${job.durable.adopted ? " · reattached" : ""} · survives Pi exit`));
     if (job.monitor) {
       meta.push(theme.fg("muted", `Monitor: ${job.monitor.delivery === "wake" ? "wake owning agent" : "UI only"} · deadline ${formatDuration(job.monitor.timeoutMs)} · ${job.eventCount} events`));
       if (job.lastEvent) meta.push(theme.fg("dim", `Latest event: ${safeText(job.lastEvent.lines.at(-1))}`));

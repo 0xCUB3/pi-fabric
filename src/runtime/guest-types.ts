@@ -516,7 +516,10 @@ type PiShellOptions = {
   monitor?: { delivery: "ui" | "wake"; timeoutMs?: number; intervalMs?: number; match?: string };
   cwd?: string; workdir?: string; directory?: string; workingDirectory?: string;
 };
-type PiBashOptions = PiShellOptions;
+type PiBashOptions = PiShellOptions & {
+  /** Owned by an external jev-fabric store (macOS/Linux): keeps running if Pi exits and reattaches on resume. Implies background. */
+  durable?: boolean;
+};
 type PiPowerShellOptions = PiShellOptions;
 type PiGrepOptions = { path?: string; glob?: string; globPattern?: string; ignoreCase?: boolean; ic?: boolean; caseInsensitive?: boolean; literal?: boolean; context?: number; ctx?: number; limit?: number; max?: number };
 type PiFindOptions = { path?: string; limit?: number; max?: number };
