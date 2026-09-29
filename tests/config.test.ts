@@ -919,4 +919,13 @@ describe("MCP Jev semantic search configuration", () => {
     expect(config.mcp.jev.semanticCandidateLimit).toBe(127);
     expect(config.mcp.jev.semanticMinProbability).toBe(0.75);
   });
+
+  it("normalizes the agent model admission policy", () => {
+    expect(DEFAULT_FABRIC_CONFIG.agents.modelAdmission).toBe("strict");
+    expect(normalizeFabricConfig({}).agents.modelAdmission).toBe("strict");
+    expect(normalizeFabricConfig({ agents: { modelAdmission: "permissive" } }).agents.modelAdmission)
+      .toBe("permissive");
+    expect(normalizeFabricConfig({ agents: { modelAdmission: "relaxed" } }).agents.modelAdmission)
+      .toBe("strict");
+  });
 });

@@ -32,6 +32,12 @@ export type FabricAgentTransport =
   | "localterm"
   | "herdr";
 export type FabricAgentRunner = "pi" | "claude" | "veda";
+
+/** How a child run's reported model is checked against the requested key.
+ * Strict fails the run on a mismatch. Permissive records the reported
+ * attribution instead, so virtual provider keys can resolve to a concrete
+ * backend at stream time. */
+export type FabricModelAdmission = "strict" | "permissive";
 export type FabricUiWidgetMode = "auto" | "always" | "hidden";
 type FabricToolDisplayMode = "full" | "compact";
 export type FabricResultFormat = "auto" | "yaml" | "json" | "text";
@@ -174,6 +180,8 @@ export interface FabricAgentConfig {
   sessionExport: boolean;
   /** Export store root override; PI_FABRIC_AGENT_DIR wins. Empty = ~/.pi-fabric/agent. */
   sessionExportDir: string;
+  /** Admission policy for the model a child process actually reports. */
+  modelAdmission: FabricModelAdmission;
 }
 
 export interface FabricToolCaptureConfig {
@@ -436,6 +444,7 @@ export const DEFAULT_FABRIC_CONFIG: FabricConfig = {
     maxTokensPerChild: 0,
     sessionExport: true,
     sessionExportDir: "",
+    modelAdmission: "strict",
   },
   jev: { ...DEFAULT_JEV_CONFIG, credentialCommand: [] },
   components: [],
@@ -615,6 +624,12 @@ const stringValue = (value: unknown): string | undefined =>
 
 const runnerValue = (value: unknown, fallback: FabricAgentRunner): FabricAgentRunner =>
   value === "pi" || value === "claude" || value === "veda" ? value : fallback;
+
+const modelAdmissionValue = (
+  value: unknown,
+  fallback: FabricModelAdmission,
+): FabricModelAdmission =>
+  value === "strict" || value === "permissive" ? value : fallback;
 
 const prewalkModeValue = (
   value: unknown,
@@ -1081,6 +1096,10 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
         typeof agents.sessionExportDir === "string"
           ? agents.sessionExportDir
           : DEFAULT_FABRIC_CONFIG.agents.sessionExportDir,
+      modelAdmission: modelAdmissionValue(
+        agents.modelAdmission,
+        DEFAULT_FABRIC_CONFIG.agents.modelAdmission,
+      ),
     },
     jev: normalizeJevConfig(input.jev),
     components: configuredComponents.map((entry) => structuredClone(entry)),

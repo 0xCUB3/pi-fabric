@@ -868,6 +868,8 @@ export class AgentManager {
         ...(systemPrompt ? ["--system-prompt", systemPrompt] : []),
         "--persist-session",
         String(request.persistSession === true),
+        "--model-admission",
+        this.config.modelAdmission ?? "strict",
         ...(sessionFile ? ["--session-file", sessionFile] : []),
         ...(sessionExportFile ? ["--session-export-file", sessionExportFile] : []),
         ...(inheritedSessionPins && inheritedSessionPins.length > 0

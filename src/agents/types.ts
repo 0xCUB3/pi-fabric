@@ -214,6 +214,7 @@ export interface AgentWorkerOptions {
   thinking?: string;
   systemPrompt?: string;
   persistSession?: boolean;
+  modelAdmission?: "strict" | "permissive";
   sessionFile?: string;
   sessionExportFile?: string;
   actorId?: string;
