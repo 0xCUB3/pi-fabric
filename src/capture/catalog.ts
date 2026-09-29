@@ -63,7 +63,7 @@ export class CapturedToolCatalog {
 
     for (const registeredTool of registeredTools) {
       const { definition, sourceInfo } = registeredTool;
-      if (sourceInfo.path === ownSourcePath) continue;
+      if (sourceInfo.path === ownSourcePath || definition.exposure === "hidden") continue;
       this.#tools.set(definition.name, {
         name: definition.name,
         definition,

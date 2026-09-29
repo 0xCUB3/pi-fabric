@@ -23,7 +23,7 @@ import {
   PI_CORE_TOOL_NAMES,
   type PiCoreToolName,
 } from "../core/pi-tools.js";
-import { classifyPiBashError, piBashResultError } from "../core/pi-bash-error.js";
+import { classifyPiBashError, classifyPiBashResult, piBashResultError } from "../core/pi-bash-error.js";
 import {
   appendShellHangNotice,
   DEFAULT_SHELL_HANG_MS,
@@ -60,6 +60,7 @@ import { writeContentForPreview } from "./write-diff-limits.js";
 import { createPreviewWriteToolDefinition } from "./write-preview.js";
 
 import { readChildToolAllowlist } from "../core/child-tool-allowlist.js";
+import { executionToolContext } from "../capture/tool-context.js";
 
 const closedPiInputSchema = (name: PiCoreToolName, source: unknown): Record<string, unknown> => {
   const schema = source as Record<string, unknown>;
@@ -233,14 +234,8 @@ const normalizeResult = (
   };
 };
 
-// Shape of a pi core tool's execute() result. AgentToolResult<unknown> is
-// { content, details, terminate? }; pi core tools throw on error rather than
-// returning isError, so isError is tracked separately in #invokeWithEvents.
-interface PiToolResult {
-  content: ToolContent;
-  details: unknown;
-  terminate?: boolean;
-}
+// Pi 0.99 reports ordinary shell exits through isError + structuredContent.
+type PiToolResult = AgentToolResult<unknown>;
 
 export class PiToolsProvider implements FabricProvider {
   readonly name = "pi";
@@ -433,11 +428,12 @@ export class PiToolsProvider implements FabricProvider {
   #executionContextFor(
     name: PiCoreToolName,
     args: Record<string, unknown>,
-    context: ExtensionContext,
-  ): ExtensionContext {
+    invocation: FabricInvocationContext,
+  ): import("@earendil-works/pi-coding-agent").ExtensionToolContext {
+    const context = executionToolContext(invocation.extensionContext, this.#catalog?.runner, invocation.nestedToolCallId, invocation.signal);
     const cwd = args[PI_BASH_CWD_KEY];
     return isPiShellToolName(name) && typeof cwd === "string"
-      ? { ...context, cwd }
+      ? Object.defineProperty(Object.create(context), "cwd", { value: cwd, enumerable: true })
       : context;
   }
 
@@ -501,7 +497,7 @@ export class PiToolsProvider implements FabricProvider {
           args,
           context.signal,
           onUpdate,
-          this.#executionContextFor(name, args, context.extensionContext),
+          this.#executionContextFor(name, args, context),
         ),
       ) as PiToolResult;
     }
@@ -557,7 +553,7 @@ export class PiToolsProvider implements FabricProvider {
             if (spilled) return;
             onUpdate(partialResult as PiToolResult);
           },
-          this.#executionContextFor(name, args, context.extensionContext),
+          this.#executionContextFor(name, args, context),
         ),
     });
     if (outcome.status === "done") {
@@ -641,6 +637,7 @@ export class PiToolsProvider implements FabricProvider {
         throwIfAborted(context.signal);
         throw isPiShellToolName(name) ? classifyPiBashError(error) : error;
       });
+      if (result.isError && isPiShellToolName(name)) throw classifyPiBashResult(result);
       this.#attachReadMedia(name, result, context);
       this.#attachReadNote(name, result, context);
       this.#attachPreview(name, result, args, context);
@@ -710,6 +707,8 @@ export class PiToolsProvider implements FabricProvider {
         },
         middleware,
       );
+      isError = result.isError === true;
+      if (isError && isPiShellToolName(name)) thrown = classifyPiBashResult(result);
     } catch (error) {
       thrown = isPiShellToolName(name) && executionStarted ? classifyPiBashError(error) : error;
       isError = true;
@@ -736,6 +735,7 @@ export class PiToolsProvider implements FabricProvider {
       input: args,
       content: result.content,
       details: result.details,
+      ...(result.structuredContent !== undefined ? { structuredContent: result.structuredContent } : {}),
       isError,
     }));
     if (patch) {
@@ -743,9 +743,13 @@ export class PiToolsProvider implements FabricProvider {
         ...result,
         content: patch.content ?? result.content,
         ...(patch.details !== undefined ? { details: patch.details } : {}),
+        ...((patch.content !== undefined || patch.structuredContent !== undefined)
+          ? { structuredContent: patch.structuredContent } : {}),
       };
       isError = patch.isError ?? isError;
     }
+
+    result = { ...result, isError };
 
     // Capture the read's clean text note AFTER the patch — the handoff strips
     // pi's non-vision note and swaps the image for a description, so the first

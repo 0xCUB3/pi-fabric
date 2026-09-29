@@ -9,6 +9,8 @@ describe("Jev native login", () => {
     const provider = registerProvider.mock.calls[0]![0];
     expect(provider.id).toBe("jev"); expect(provider.getModels()).toEqual([]);
     expect(provider.auth.apiKey.login).toBeTypeOf("function");
+    expect(() => provider.stream()).toThrow("not chat generation");
+    expect(() => provider.streamSimple()).toThrow("not chat generation");
   });
   it("persists api_key credentials through Pi storage and resolves login/logout", async () => {
     const storage = new InMemoryCredentialStore();

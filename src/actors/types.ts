@@ -22,11 +22,15 @@ import type { FabricParticipantResidency } from "../topology/types.js";
 //     messages and its result is sent verbatim. Exposing it to actors would let
 //     them rewrite the system prompt per request, which Fabric deliberately
 //     avoids to keep the cached system prefix byte-stable.
-// To observe either one as an actor event, add it to
+// Pi 0.99's mcp_servers_change is infrastructure reconciliation, and
+// provider_stream_event carries raw provider data on the request hot path.
+// Neither is an actor observation: forwarding would expose raw payloads and
+// enqueue actors once per stream frame. Keep the exhaustive allowlist below.
+// To observe these as actor events, add them to
 // FABRIC_ACTOR_PI_HOST_EVENTS below and give it a FABRIC_LIFECYCLE_EVENTS topic.
 export type FabricActorPiHostEvent = Exclude<
   ExtensionEvent["type"],
-  "project_trust" | "cache_warming_decision" | "agent_before_settle" | "context_with_system"
+  "project_trust" | "cache_warming_decision" | "agent_before_settle" | "context_with_system" | "mcp_servers_change" | "provider_stream_event"
 >;
 
 const defineFabricActorPiHostEvents = <

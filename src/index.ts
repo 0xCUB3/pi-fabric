@@ -49,6 +49,7 @@ import { registerCompactionHook } from "./compaction/hook.js";
 import { compactAtConfiguredThreshold } from "./compaction/threshold.js";
 import {
   createToolOwnershipReassertion,
+  fabricModelContext,
   FabricToolLifecycle,
   FabricToolOwnership,
   ownsFabricToolSource,
@@ -204,8 +205,8 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
   const capturePolicy = () => effectiveToolCaptureConfig(state.config);
   const fabricOwnsModelTools = (): boolean =>
     state.config.fullCodeMode || state.config.schema.mode === "enforce";
-  // Captured tools that must stay out of the model's active set in full code
-  // mode: every captured extension tool minus the capture.keepVisible names.
+  // Legacy capture preferences still describe the catalog, but native loadout
+  // hiding is unconditional in full-code/enforce mode, including keepVisible.
   const hiddenCapturedToolNames = (): Set<string> => {
     const visible = new Set(capturePolicy().keepVisible);
     return new Set(
@@ -221,8 +222,7 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
     createToolOwnershipReassertion({
       ready: () => state.cwd !== undefined,
       active: () => {
-        const policy = capturePolicy();
-        return policy.enabled && policy.hideFromModel && fabricOwnsModelTools();
+        return fabricOwnsModelTools();
       },
       hiddenNames: hiddenCapturedToolNames,
       apply: (hidden) => toolOwnership.apply(true, hidden),
@@ -980,6 +980,14 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
   // must not leak into the model's next turn.
   pi.on("before_agent_start", () => {
     reassertToolOwnership();
+  });
+
+  pi.on("context_with_system", (event) => {
+    if (!fabricOwnsModelTools()) return;
+    reassertToolOwnership();
+    return { messages: fabricModelContext(event.messages, {
+      name: fabricTool.name, description: fabricTool.description, parameters: fabricTool.parameters,
+    }) };
   });
 
   registerFabricCommand(pi, {

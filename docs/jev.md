@@ -48,7 +48,7 @@ Shell execution retains Fabric approvals, compatible shell middleware, and capab
 
 ## Authentication
 
-On Pi 0.85.1 or newer, `/login jev` prompts privately for a TypeSafe API key and stores an ordinary API-key credential under `jev` in Pi's `auth.json`. `/logout` removes it. Jev registers an **auth-only provider with no chat models**; it does not appear as a selectable text-generating model.
+On Pi 0.99.0 or newer, `/login jev` prompts privately for a TypeSafe API key and stores an ordinary API-key credential under `jev` in Pi's `auth.json`. `/logout` removes it. Jev registers an **auth-only provider with no chat models**; it does not appear as a selectable text-generating model.
 
 Jev has three upstream routes. Bare aliases (`jev-latest`, `jev-1.13`, `jev-1.13.0`, `jev-preview`) post to TypeSafe's `/v1/systemone`. OpenRouter decisions IDs (`typesafe/jev-1.13`, `~typesafe/jev-latest`) post to OpenRouter's `/api/alpha/decisions` and reuse the **existing `openrouter` credential** (the same `auth.json` entry as your chat models), so `/login openrouter` covers both. OpenRouter serves Jev on its Decisions API, not `/chat/completions`, and has no `jev-preview` alias. Vercel AI Gateway model IDs (`typesafe-ai/jev`, or the `jev-latest` alias) post to its TypeSafe-compatible `/typesafe/v1/systemone` endpoint and reuse the **existing `vercel-ai-gateway` credential** (`/login vercel-ai-gateway`, `AI_GATEWAY_API_KEY`); the request and response shapes stay TypeSafe's own, so only the base URL and key change. No second provider is registered.
 
