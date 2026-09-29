@@ -349,7 +349,8 @@ export class FabricRuntimeState {
     try {
       await this.#closeInternal();
       this.#shellJobs = new FabricShellJobStore();
-      const sessionId = context.sessionManager?.getSessionId?.();
+      // Closed-world managed hosts must not reach the ambient session manager.
+      const sessionId = this.#managedHost ? undefined : context.sessionManager?.getSessionId?.();
       if (sessionId && this.pi.events) {
         this.#shellTiming = new FabricShellTimingBridge(this.pi.events, sessionId, this.#shellJobs);
       }
