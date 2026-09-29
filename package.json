@@ -145,5 +145,8 @@
     "ajv": {
       "fast-uri": "^3.1.6"
     }
+  },
+  "optionalDependencies": {
+    "jev-fabric": "0.5.0"
   }
 }

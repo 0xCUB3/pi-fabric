@@ -52,6 +52,21 @@ describe.skipIf(process.platform === "win32")("Jev decisions through jev-fabric"
     expect(await callProgram(inProcess.provider, "run", program)).toMatchObject({ state: "completed", result: "jev-1.13.0" });
   });
 
+  it("stays in-process by default, even with jev-fabric available", async () => {
+    expect(normalizeFabricConfig({}).jev.transport).toBe("fabric");
+    const { root } = setup("fabric");
+    const config = normalizeFabricConfig({ approvals: { network: "allow", execute: "allow", read: "allow", write: "allow" } });
+    const registry = new ActionRegistry();
+    const fetcher = vi.fn(async () => new Response(JSON.stringify(answer), { status: 200 }));
+    const resolve = vi.fn();
+    const provider = new JevProvider({ registry, config, jevFabric: { home: root, options: { cwd: root }, resolve } as unknown as DurableShellBridge },
+      new JevClient(config.jev, fetcher as unknown as typeof fetch, new JevCredentials([], { TYPESAFE_API_KEY: "test-only-never-a-real-key" })));
+    registry.register(provider);
+    cleanups.push(() => registry.close());
+    expect(await callProgram(provider, "run", program)).toMatchObject({ state: "completed", result: "jev-1.13.0" });
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
   it("falls back only when no binary is available under auto, and fails under jev-fabric", async () => {
     expect(await callProgram(setup("auto", false).provider, "run", program)).toMatchObject({ state: "completed", result: "jev-1.13.0" });
     expect(await callProgram(setup("jev-fabric", false).provider, "run", program)).toMatchObject({ state: "failed", error: expect.stringContaining("needs jev-fabric") });

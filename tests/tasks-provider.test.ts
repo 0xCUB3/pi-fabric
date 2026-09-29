@@ -89,9 +89,9 @@ describe("tasks provider", () => {
     const lagging = await provider.invoke("read", { id: job.id, offset: 0, max: 4 }, context);
     expect(lagging).toMatchObject({ offset: 7, omittedBytes: 7, bytes: 4 });
     await job.finish(0);
-    // After exit a 64 KiB window stays readable at the same offsets.
+    // After exit a 32 KiB window stays readable at the same offsets.
     const tail = await provider.invoke("read", { id: job.id, offset: 0 }, context) as { offset: number; omittedBytes: number; next: number; eof: boolean };
-    expect(tail).toMatchObject({ offset: 7 + 1024 * 1024 - 64 * 1024, eof: true, next: 7 + 1024 * 1024 });
+    expect(tail).toMatchObject({ offset: 7 + 1024 * 1024 - 32 * 1024, eof: true, next: 7 + 1024 * 1024 });
   });
   it("long-polls a read for new bytes or exit, without stopping the task", async () => {
     const { store, provider } = setup();

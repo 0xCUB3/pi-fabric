@@ -16,9 +16,9 @@ export interface FabricJevConfig {
   maxToolCalls: number;
   maxTokens: number;
   /**
-   * Where Jev program decisions are dispatched. `auto` uses one jev-fabric
-   * `serve` connection per program run when a compatible binary is available
-   * (macOS/Linux), else this process; `fabric` is always in-process;
+   * Where Jev program decisions are dispatched. `fabric` (default) is always
+   * in-process. `auto` opts into one jev-fabric `serve` connection per program
+   * run when a compatible binary is available (macOS/Linux), else in-process;
    * `jev-fabric` requires it. Direct calls and auto approvals stay in-process.
    */
   transport: "auto" | "fabric" | "jev-fabric";
@@ -36,7 +36,7 @@ export const DEFAULT_JEV_CONFIG: FabricJevConfig = {
   maxEvaluations: 1_000,
   maxToolCalls: 10_000,
   maxTokens: 1_000_000,
-  transport: "auto",
+  transport: "fabric",
 };
 export function normalizeJevConfig(value: unknown): FabricJevConfig {
   const input = value && typeof value === "object" && !Array.isArray(value)
@@ -66,6 +66,6 @@ export function normalizeJevConfig(value: unknown): FabricJevConfig {
     maxEvaluations: integer("maxEvaluations", 100_000),
     maxToolCalls: integer("maxToolCalls", 1_000_000),
     maxTokens: integer("maxTokens", 100_000_000),
-    transport: input.transport === "fabric" || input.transport === "jev-fabric" ? input.transport : "auto",
+    transport: input.transport === "auto" || input.transport === "jev-fabric" ? input.transport : "fabric",
   };
 }

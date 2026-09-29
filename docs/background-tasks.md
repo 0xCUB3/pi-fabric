@@ -197,7 +197,7 @@ const seen = await tools.call({ref: "tasks.watch", args: {id, match: "listening 
 // {reason, lines, omittedBytes, more, nextCursor}: nextCursor is a byte offset
 ```
 
-- `tasks.read` offsets count every byte of combined output since launch and never reset. The live window is the 1 MiB tail; after exit 64 KiB stays readable. Older bytes are disclosed in `omittedBytes`. Text pages never split a UTF-8 character; `encoding:"base64"` is byte-exact. `waitMs` long-polls for new bytes or exit.
+- `tasks.read` offsets count every byte of combined output since launch and never reset. The live window is the 1 MiB tail; after exit 32 KiB stays readable. Older bytes are disclosed in `omittedBytes`. Text pages never split a UTF-8 character; `encoding:"base64"` is byte-exact. `waitMs` long-polls for new bytes or exit.
 - `tasks.watch` with `match` scans complete lines after a byte cursor for a case-sensitive literal chosen at watch time, like `jev-fabric watch <id> <literal>`. The cursor stops at line boundaries, so an unfinished line is matched once it ends or the task exits. Up to 64 lines per call; call again while `more` is true.
 - Neither consumes, acknowledges, wakes the agent, or stops the task. Without `match`, `tasks.watch` keeps reading a launch-time monitor as below.
 

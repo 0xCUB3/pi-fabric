@@ -138,8 +138,12 @@ export class DurableShellBridge {
     const ownerId = this.options.ownerId;
     if (!ownerId || process.platform === "win32") return Promise.resolve();
     // One missing-file check when durable tasks were never used; no module loads.
-    // Mirrors DURABLE_TASKS_DIRECTORY without loading the registry module.
-    if (!this.#resumed && !fs.existsSync(path.join(this.#stateDirectory, "durable-tasks"))) return Promise.resolve();
+    // Mirrors DURABLE_TASKS_DIRECTORY without loading the registry module. Only
+    // tasks from earlier processes need reattaching, so one check per session decides.
+    if (!this.#resumed && !fs.existsSync(path.join(this.#stateDirectory, "durable-tasks"))) {
+      this.#resumed = Promise.resolve();
+      return this.#resumed;
+    }
     this.#resumed ??= (async () => {
       const { registry } = await this.#load();
       const records = (await registry.owned(ownerId)).filter(record => record.home === this.home);

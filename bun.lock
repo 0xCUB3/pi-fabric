@@ -31,6 +31,9 @@
         "knip": "^6.29.0",
         "vitest": "^4.1.10",
       },
+      "optionalDependencies": {
+        "jev-fabric": "0.5.0",
+      },
       "peerDependencies": {
         "@earendil-works/pi-coding-agent": ">=0.85.1",
         "@earendil-works/pi-tui": ">=0.80.6",
@@ -602,6 +605,14 @@
     "is-unicode-supported": ["is-unicode-supported@2.1.0", "", {}, "sha512-mE00Gnza5EEB3Ds0HfMyllZzbBrmLOX3vfWoj9A9PEnTfratQ/BcaJOuMhnkhjXvb2+FkY3VuHqtAGpTPmglFQ=="],
 
     "isexe": ["isexe@2.0.0", "", {}, "sha512-RHxMLp9lnKHGHRng9QFhRCMbYAcVpn69smSGcq3f36xjgVVWThj4qqLbTLlq7Ssj8B+fIQ1EuCEGI2lKsyQeIw=="],
+
+    "jev-fabric": ["jev-fabric@0.5.0", "", { "optionalDependencies": { "jev-fabric-darwin": "0.5.0", "jev-fabric-linux-arm64": "0.5.0", "jev-fabric-linux-x64": "0.5.0" }, "bin": { "jev-fabric": "bin/jev-fabric.js" } }, "sha512-Ocqdob3bGdLT2R7iaWg7eViHCrIkaBqxf2sSX9pCBHG3q04E8fIR4pYTxcUmalme4qWQkCKXAPbzpNWAXOlLBw=="],
+
+    "jev-fabric-darwin": ["jev-fabric-darwin@0.5.0", "", { "os": "darwin", "cpu": [ "x64", "arm64", ] }, "sha512-Aukd8WXJXiuSUYuv/dNNjOKI8y+mRtJFqTzh7TWyt0f7C/UbqjR9Orby6mMZef+Z5Qo9fZCQ+vbctl0thyekWg=="],
+
+    "jev-fabric-linux-arm64": ["jev-fabric-linux-arm64@0.5.0", "", { "os": "linux", "cpu": "arm64" }, "sha512-g9mOsSVj+Yo4MCLdQVco+n0unWbkwENSu0HF/X81CpnGfihA2b4/2VAq2A7oZGomAz5pwUIZsp6NHgoGG3G0GQ=="],
+
+    "jev-fabric-linux-x64": ["jev-fabric-linux-x64@0.5.0", "", { "os": "linux", "cpu": "x64" }, "sha512-TFnzlE+3eWAIjhBH8CstVf5NLdnbSC5MZPugrqXui9eNdzEMH4YVe734Rl+gOcJ6/6Wkhc//JhRzekzh+icbDQ=="],
 
     "jiti": ["jiti@2.7.0", "", { "bin": { "jiti": "lib/jiti-cli.mjs" } }, "sha512-AC/7JofJvZGrrneWNaEnJeOLUx+JlGt7tNa0wZiRPT4MY1wmfKjt2+6O2p2uz2+skll8OZZmJMNqeke7kKbNgQ=="],
 

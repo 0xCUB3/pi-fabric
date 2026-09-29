@@ -15,8 +15,8 @@ const SHELL_HANG_SNAPSHOT_BYTES = 8_000;
 export const SHELL_TAIL_BYTES = 1024 * 1024;
 export const SHELL_LOG_BYTES = 8 * 1024 * 1024;
 export const SHELL_COMPLETED_HANDLES = 256;
-/** Output kept readable by offset after a task finishes (the live window is SHELL_TAIL_BYTES). */
-export const SHELL_FINISHED_READ_BYTES = 64 * 1024;
+/** Output kept readable by offset after a task finishes, like jev-fabric's 32 KiB receipt tails. */
+export const SHELL_FINISHED_READ_BYTES = 32 * 1024;
 /** Largest single tasks.read page. */
 export const SHELL_READ_MAX_BYTES = 64 * 1024;
 

@@ -113,4 +113,5 @@ need protocol 2. Every harness sharing a project defaults to the same store,
 `<cwd>/.jev-fabric-native`, whose format version keeps mixed versions safe.
 
 Windows keeps Fabric's own batch tasks; durable tasks and sessions are not
-offered there yet.
+offered there yet. Jev program decisions stay in-process unless you opt into
+`jev.transport: "auto"` or `"jev-fabric"` ([Jev](jev.md#schemas-and-limits)).

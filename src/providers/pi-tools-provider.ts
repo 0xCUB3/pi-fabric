@@ -615,8 +615,10 @@ export class PiToolsProvider implements FabricProvider {
     // CapturedToolsProvider, so delegate to it unchanged.
     if (this.#catalog?.get(name) && !middleware) {
       if (isPiShellToolName(name) && args.monitor !== undefined) throw new Error("Shell monitors are unavailable for opaque shell overrides; a Fabric-compatible middleware adapter is required");
-      if (isPiShellToolName(name) && args.durable !== undefined) throw new Error("Durable shell tasks are unavailable for opaque shell overrides; a Fabric-compatible middleware adapter is required");
-      const result = await this.#capturedTools!.invoke(name, args, context);
+      if (isPiShellToolName(name) && args.durable === true) throw new Error("Durable shell tasks are unavailable for opaque shell overrides; a Fabric-compatible middleware adapter is required");
+      // `durable` is Fabric's own argument; an override never sees it.
+      const { durable: _durable, ...overrideArgs } = args;
+      const result = await this.#capturedTools!.invoke(name, overrideArgs, context);
       this.#attachReadMedia(name, result, context);
       this.#attachReadNote(name, result, context);
       this.#attachPreview(name, result, args, context);
