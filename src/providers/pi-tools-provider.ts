@@ -81,6 +81,17 @@ const closedPiInputSchema = (name: PiCoreToolName, source: unknown): Record<stri
       description:
         "Run as a durable background task owned by jev-fabric (the user's install or the bundled package). It keeps running if Pi exits and reattaches to this session on resume; other harnesses sharing the store can see it. Implies background. Use for dev servers and long jobs that must outlive the session; stop explicitly with tasks.stop.",
     };
+    properties.notify = {
+      type: "object",
+      description:
+        "With durable:true: when the command exits, publish {kind (default task.completed), data:{taskId, exitCode, description?}} to this mesh topic, even if no session is attached.",
+      properties: {
+        topic: { type: "string", minLength: 1, maxLength: 128 },
+        kind: { type: "string", minLength: 1, maxLength: 128 },
+      },
+      required: ["topic"],
+      additionalProperties: false,
+    };
   }
   if (name === "edit") {
     properties.all = { type: "boolean", description: "Apply every replacement to all matching occurrences." };
@@ -93,6 +104,21 @@ const closedPiInputSchema = (name: PiCoreToolName, source: unknown): Record<stri
     }
   }
   return { ...schema, properties, additionalProperties: false };
+};
+
+const NOTIFY_FIELD_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,127}$/;
+
+/** `pi.bash` durable completion notify: `{ topic, kind? }`, validated fail-closed. */
+const parseDurableNotify = (value: unknown): { topic: string; kind?: string } | undefined => {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("notify must be an object");
+  const input = value as Record<string, unknown>;
+  if (Object.keys(input).some((key) => key !== "topic" && key !== "kind")) throw new Error("Unknown notify option");
+  if (typeof input.topic !== "string" || !NOTIFY_FIELD_PATTERN.test(input.topic)) throw new Error("notify.topic must be a valid mesh topic");
+  if (input.kind !== undefined && (typeof input.kind !== "string" || !NOTIFY_FIELD_PATTERN.test(input.kind))) {
+    throw new Error("notify.kind must be a mesh event kind of at most 128 characters");
+  }
+  return { topic: input.topic, ...(typeof input.kind === "string" ? { kind: input.kind } : {}) };
 };
 
 const MAX_RENDERER_ARGUMENT_CHARS = 200_000;
@@ -452,6 +478,7 @@ export class PiToolsProvider implements FabricProvider {
     args: Record<string, unknown>,
     job: ReturnType<FabricShellJobStore["begin"]>,
     middleware: FabricBashMiddlewareV1 | undefined,
+    notify?: { topic: string; kind?: string },
   ): Promise<ToolDefinition<any, any, any>> {
     const cwd = typeof args[PI_BASH_CWD_KEY] === "string" ? args[PI_BASH_CWD_KEY] : this.#cwd;
     if (name === "bash") {
@@ -460,6 +487,7 @@ export class PiToolsProvider implements FabricProvider {
         ? await this.#shellJobs.durable!.launch(job, {
             shellPath: options?.shellPath, label: job.options.description, filtered: middleware !== undefined,
             command: typeof args.command === "string" ? args.command : "", cwd, ownerId: job.options.ownerId,
+            notify,
           })
         : createLocalBashOperations(options?.shellPath !== undefined ? { shellPath: options.shellPath } : undefined);
       const operations = middleware ? middleware.wrapOperations(local) : local;
@@ -521,8 +549,10 @@ export class PiToolsProvider implements FabricProvider {
       if (args.background === false) throw new Error("durable runs in the background; omit background:false");
       if (process.platform === "win32" || !this.#shellJobs.durable) throw new Error("Durable shell tasks need jev-fabric on macOS or Linux in a Fabric full-code session");
     }
+    const notify = parseDurableNotify(args.notify);
+    if (notify && !durable) throw new Error("notify requires durable:true");
     const background = args.background === true || monitor !== undefined || durable;
-    const { background: _background, monitor: _monitor, description: _description, durable: _durable, ...executeArgs } = args;
+    const { background: _background, monitor: _monitor, description: _description, durable: _durable, notify: _notify, ...executeArgs } = args;
     const job = this.#shellJobs.begin(name, command, {
       ...(durable ? { durable: { home: this.#shellJobs.durable!.home } } : {}),
       cwd: typeof args[PI_BASH_CWD_KEY] === "string" ? args[PI_BASH_CWD_KEY] : this.#cwd,
@@ -532,7 +562,7 @@ export class PiToolsProvider implements FabricProvider {
     });
     let tool: ToolDefinition<any, any, any>;
     try {
-      tool = await this.#trackedShellDefinition(name, executeArgs, job, middleware);
+      tool = await this.#trackedShellDefinition(name, executeArgs, job, middleware, notify);
     } catch (error) {
       await job.finish(null);
       throw error;
@@ -619,6 +649,7 @@ export class PiToolsProvider implements FabricProvider {
     if (this.#catalog?.get(name) && !middleware) {
       if (isPiShellToolName(name) && args.monitor !== undefined) throw new Error("Shell monitors are unavailable for opaque shell overrides; a Fabric-compatible middleware adapter is required");
       if (isPiShellToolName(name) && args.durable === true) throw new Error("Durable shell tasks are unavailable for opaque shell overrides; a Fabric-compatible middleware adapter is required");
+      if (isPiShellToolName(name) && args.notify !== undefined) throw new Error("notify requires durable:true");
       // `durable` is Fabric's own argument; an override never sees it.
       const { durable: _durable, ...overrideArgs } = args;
       const result = await this.#capturedTools!.invoke(name, overrideArgs, context);

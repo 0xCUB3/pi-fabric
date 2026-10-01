@@ -129,6 +129,30 @@ const validateResidentHostConfig = (value: unknown, configPath: string): Residen
   return config as ResidentHostConfig;
 };
 
+/**
+ * The resident host's idle rule. Live durable participants, queued work or a
+ * pending request keep it alive; pending mesh schedules do too while at least
+ * one durable participant could receive them, and `wakeAt` names the next due
+ * time so the host releases it on time. Without durable participants a
+ * schedule waits for the next Fabric process that touches the mesh.
+ */
+export const residentIdleDecision = (input: {
+  now: number;
+  idleSince: number;
+  activeActor: boolean;
+  activeAgent: boolean;
+  pendingRequest: boolean;
+  durableParticipants: boolean;
+  nextScheduleDueAt: number | undefined;
+  idleExitMs?: number;
+}): { busy: boolean; exit: boolean; wakeAt?: number } => {
+  const holdsSchedules = input.nextScheduleDueAt !== undefined && input.durableParticipants;
+  const wakeAt = holdsSchedules ? input.nextScheduleDueAt : undefined;
+  const busy = input.activeActor || input.activeAgent || input.pendingRequest || holdsSchedules;
+  const exit = !busy && input.now - input.idleSince >= (input.idleExitMs ?? IDLE_EXIT_MS);
+  return { busy, exit, ...(wakeAt !== undefined ? { wakeAt } : {}) };
+};
+
 class ResidentHost {
   readonly hostId: string;
   readonly identity: MeshIdentity;
@@ -148,6 +172,8 @@ class ResidentHost {
   readonly #deliveryPrefix: string;
   readonly #token = randomUUID();
   #requestTimer: NodeJS.Timeout | undefined;
+  #scheduleTimer: NodeJS.Timeout | undefined;
+  #scheduleWakeAt: number | undefined;
   #stopHeartbeat: (() => void) | undefined;
   #pollingRequests = false;
   #closed = false;
@@ -382,6 +408,8 @@ class ResidentHost {
     this.#closed = true;
     if (this.#requestTimer) clearInterval(this.#requestTimer);
     this.#requestTimer = undefined;
+    if (this.#scheduleTimer) clearTimeout(this.#scheduleTimer);
+    this.#scheduleTimer = undefined;
     this.#stopHeartbeat?.();
     this.#stopHeartbeat = undefined;
     while (this.#pollingRequests) await delay(10);
@@ -595,11 +623,46 @@ class ResidentHost {
     } catch {
       // Missing request directory is empty.
     }
-    if (activeActor || activeAgent || pendingRequest) {
-      this.#idleSince = Date.now();
+    let nextScheduleDueAt: number | undefined;
+    try {
+      nextScheduleDueAt = this.mesh.nextScheduleDueAt();
+    } catch {
+      // Unreadable schedules neither keep the host alive nor stop it.
+    }
+    const now = Date.now();
+    const decision = residentIdleDecision({
+      now,
+      idleSince: this.#idleSince,
+      activeActor,
+      activeAgent,
+      pendingRequest,
+      durableParticipants: activeActor || activeAgent,
+      nextScheduleDueAt,
+    });
+    this.#armScheduleWake(decision.wakeAt);
+    if (decision.busy) {
+      this.#idleSince = now;
       return;
     }
-    if (Date.now() - this.#idleSince >= IDLE_EXIT_MS) this.onIdle();
+    if (decision.exit) this.onIdle();
+  }
+
+  // Re-armed on every idle check: the due time of the earliest pending
+  // schedule, released here even if no actor monitor polls in time.
+  #armScheduleWake(wakeAt: number | undefined): void {
+    if (wakeAt === this.#scheduleWakeAt) return;
+    if (this.#scheduleTimer) clearTimeout(this.#scheduleTimer);
+    this.#scheduleTimer = undefined;
+    this.#scheduleWakeAt = wakeAt;
+    if (wakeAt === undefined || this.#closed) return;
+    this.#scheduleTimer = setTimeout(() => {
+      this.#scheduleTimer = undefined;
+      this.#scheduleWakeAt = undefined;
+      void this.mesh.releaseDueSchedules().catch(() => undefined).finally(() => {
+        if (!this.#closed) this.#checkIdle();
+      });
+    }, Math.min(Math.max(0, wakeAt - Date.now()), 2_147_000_000));
+    this.#scheduleTimer.unref();
   }
 
   async #processRequest(filePath: string): Promise<void> {

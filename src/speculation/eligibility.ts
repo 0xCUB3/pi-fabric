@@ -17,6 +17,7 @@ export const TIER_A_SPECULATION_REFS: ReadonlySet<string> = new Set([
   "state.get",
   "state.history",
   "state.complexity",
+  "mesh.scheduled",
   "schema.status",
   "compact.status",
   "compact.pressure",

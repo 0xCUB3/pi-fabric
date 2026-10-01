@@ -168,6 +168,30 @@ return await pi.bash({cmd: "bun run dev", durable: true, description: "Dev serve
 - Reattached output passes through the currently active middleware. If a task
   was filtered at launch and no middleware is active now, its output is withheld.
 
+### Completion notify through the mesh
+
+```ts
+return await pi.bash({cmd: "bun run build", durable: true, description: "Build", notify: {topic: "builds"}});
+```
+
+`notify: {topic, kind?}` (durable only) publishes one event when the command exits:
+`{kind: kind ?? "task.completed", data: {taskId, exitCode, description?}}` on that
+[mesh topic](agents.md#scheduled-events), even when no Pi session is attached.
+Subscribed actors, including durable actors on the resident host, wake on it.
+
+- At launch, Fabric mints a single-use [external grant](agents.md#external-grants)
+  for the topic and kind, valid for 7 days (the longest durable job is 24 hours). The
+  private `0600` launch script runs the command in a subshell, then runs
+  `pi-fabric mesh post` with the token in its environment and re-exits with the
+  command's own status. A failed or impossible post never changes the task result.
+- The event is posted by the job's own shell, so it carries `origin: "external"` and
+  `untrusted: true` like any grant post. `exitCode` is the subshell status, so a
+  signal-terminated command reports `128 + signal`.
+- Delivery happens when the shell reaches its trailer. A task stopped through
+  `tasks.stop` or killed at its timeout usually does not reach it and publishes
+  nothing; its session still records the terminal state. The mesh must be enabled,
+  and the topic must not be host-reserved. An unused grant expires on its own.
+
 ### Jobs from other harnesses
 
 The default store is `<cwd>/.jev-fabric-native`, the same one Claude Code,

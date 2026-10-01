@@ -71,6 +71,8 @@ export interface JevFabricLaunch {
   defaultTimeoutMs: number;
   maxTimeoutMs: number;
   label?: string | undefined;
+  /** Rewrites the private launch script, e.g. to append a completion notify trailer. */
+  wrapScript?: ((command: string) => string) | undefined;
   detached: AbortSignal;
   onStarted: (jobId: string, scriptPath: string) => Promise<void> | void;
   /** The job reached a final receipt (not a detach). */
@@ -93,7 +95,7 @@ export function createJevFabricBashOperations(launch: JevFabricLaunch): BashOper
       const shell = resolveShell(launch.shellPath);
       await fs.promises.mkdir(launch.scriptDirectory, { recursive: true, mode: 0o700 });
       const scriptPath = path.join(launch.scriptDirectory, `${launch.taskId}.sh`);
-      await fs.promises.writeFile(scriptPath, command, { mode: 0o600, flag: "w" });
+      await fs.promises.writeFile(scriptPath, launch.wrapScript ? launch.wrapScript(command) : command, { mode: 0o600, flag: "w" });
       const timeoutMs = timeout !== undefined && timeout > 0
         ? Math.min(launch.maxTimeoutMs, Math.ceil(timeout * 1000))
         : launch.defaultTimeoutMs;

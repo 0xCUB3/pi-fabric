@@ -537,6 +537,8 @@ type PiShellOptions = {
 type PiBashOptions = PiShellOptions & {
   /** Owned by an external jev-fabric store (macOS/Linux): keeps running if Pi exits and reattaches on resume. Implies background. */
   durable?: boolean;
+  /** Durable only: on exit publish {kind ?? "task.completed", data:{taskId, exitCode, description?}}. */
+  notify?: { topic: string; kind?: string };
 };
 type PiPowerShellOptions = PiShellOptions;
 type PiGrepOptions = { path?: string; glob?: string; globPattern?: string; ignoreCase?: boolean; ic?: boolean; caseInsensitive?: boolean; literal?: boolean; context?: number; ctx?: number; limit?: number; max?: number };
@@ -866,7 +868,12 @@ interface FabricMeshEvent {
   text?: string;
   data?: unknown;
   createdAt: number;
+  /** External grant post: untrusted data. */
+  origin?: "external"; untrusted?: true; grantId?: string;
+  scheduled?: { dueAt: number; key?: string };
 }
+type FabricMeshSchedule = Omit<FabricMeshEvent, "sequence" | "origin" | "untrusted" | "grantId" | "scheduled"> & { key?: string; dueAt: number };
+interface FabricMeshGrant { grantId: string; topic: string; kind?: string; createdAt: number; expiresAt: number; uses: number; maxUses: number; createdBy: FabricMeshIdentity }
 interface FabricMeshStateEntry<T = unknown> {
   key: string;
   value: T;
@@ -877,6 +884,14 @@ interface FabricMeshStateEntry<T = unknown> {
 interface FabricMeshApi {
   self(): Promise<FabricMeshIdentity>;
   publish(args: { topic: string; kind?: string; to?: string; text?: string; data?: unknown; message?: string; body?: string }): Promise<FabricMeshEvent>;
+  /** Schedules instead: notBefore (epoch ms/ISO) or afterMs, ≤366 days; key replaces. */
+  publish(args: { topic: string; kind?: string; to?: string; text?: string; data?: unknown; notBefore?: number | string; afterMs?: number; key?: string }): Promise<FabricMeshSchedule & { scheduled: true }>;
+  scheduled(args?: { topic?: string; limit?: number }): Promise<FabricMeshSchedule[]>;
+  unschedule(args: { key: string }): Promise<{ removed: boolean }>;
+  /** External post token, shown once. ttlMs 1 min..30 days; uses 1..10000, default 1. */
+  grant(args: { topic: string; ttlMs: number; uses?: number; kind?: string }): Promise<FabricMeshGrant & { token: string; command: string }>;
+  revoke(args: { grantId: string }): Promise<{ revoked: boolean }>;
+  grants(): Promise<FabricMeshGrant[]>;
   read(args?: { after?: number; topic?: string; to?: string; limit?: number; max?: number }): Promise<FabricMeshEvent[]>;
   members(args?: { scope?: FabricParticipantScope; kinds?: FabricParticipantKind[]; includeStale?: boolean; limit?: number; max?: number; include_stale?: boolean }): Promise<FabricParticipantInfo[]>;
   get<T = unknown>(args: { key: string }): Promise<FabricMeshStateEntry<T> | null>;

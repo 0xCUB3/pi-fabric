@@ -9,6 +9,8 @@ import { FabricShellJobStore } from "../src/core/shell-jobs.js";
 import { DurableShellBridge, resolveJevFabricHome } from "../src/jev-fabric/bridge.js";
 import { JevFabricCli } from "../src/jev-fabric/client.js";
 import { DurableTaskRegistry } from "../src/jev-fabric/registry.js";
+import { createMeshGrant, listMeshGrants, meshCliArgv, wrapDurableNotifyScript } from "../src/mesh/grants.js";
+import { MeshStore } from "../src/mesh/store.js";
 import { PiToolsProvider } from "../src/providers/pi-tools-provider.js";
 import { TasksProvider } from "../src/providers/tasks-provider.js";
 import type { FabricInvocationContext } from "../src/protocol.js";
@@ -146,6 +148,37 @@ describe.skipIf(process.platform === "win32")("durable shell tasks through jev-f
     store.durable = undefined;
     await expect(bash({ command: "true", durable: true })).rejects.toThrow("need jev-fabric");
     expect(store.list()).toEqual([]);
+  });
+
+  it("publishes a mesh notify on exit while preserving the task's exit code", async () => {
+    const env = environment();
+    const { store, tasks, bash } = session(env);
+    const mesh = new MeshStore(path.join(env.root, "mesh"), 64 * 1024, 100);
+    const owner = { id: "session:durable", name: "main", kind: "main" as const };
+    store.durable = new DurableShellBridge(store, {
+      cwd: env.root, agentDir: env.agentDir, ownerId: "durable-session",
+      settings: () => ({ binary: env.binary, home: env.home, timeoutMs: 60_000 }),
+      middleware: () => undefined,
+      // Mirrors the runtime-state wiring: one single-use grant per task.
+      notify: async ({ topic, kind, taskId, description }) => {
+        const { token } = await createMeshGrant(mesh, { topic, kind: kind ?? "task.completed", ttlMs: 7 * 86_400_000, createdBy: owner });
+        return (command) => wrapDurableNotifyScript(command, {
+          argv: meshCliArgv(), root: mesh.root, token, kind: kind ?? "task.completed", taskId,
+          ...(description !== undefined ? { description } : {}),
+        });
+      },
+    });
+    await expect(bash({ command: "true", notify: { topic: "builds" } })).rejects.toThrow("notify requires durable:true");
+    await expect(bash({ command: "true", durable: true, notify: { topic: "bad topic" } })).rejects.toThrow("notify.topic");
+    const result = await bash({ command: "printf 'built\\n'; exit 4", durable: true, description: "Build", notify: { topic: "builds" } });
+    const id = result.details!.taskId!;
+    const waited = await tasks.invoke("wait", { id, timeoutMs: 20_000 }, invocation) as { task: any };
+    expect(waited.task).toMatchObject({ status: "failed", exitCode: 4 });
+    await vi.waitFor(() => expect(mesh.read({ topic: "builds" })).toEqual([expect.objectContaining({
+      kind: "task.completed", untrusted: true, data: { taskId: id, description: "Build", exitCode: 4 },
+    })]), { timeout: 10_000 });
+    // The single-use grant is spent.
+    expect(listMeshGrants(mesh)).toEqual([expect.objectContaining({ uses: 0, maxUses: 1 })]);
   });
 
   it("explains a missing binary instead of falling back to a local process", async () => {

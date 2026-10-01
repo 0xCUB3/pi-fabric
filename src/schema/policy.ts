@@ -15,6 +15,8 @@ const allowedEnforceRefs = new Set([
   "mesh.get",
   "mesh.list",
   "decisions.list",
+  "mesh.scheduled",
+  "mesh.grants",
   "compact.status",
   "compact.pressure",
   "cache.status",

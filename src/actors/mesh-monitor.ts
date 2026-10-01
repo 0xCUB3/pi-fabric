@@ -9,6 +9,8 @@ const MESH_WATCH_RECONCILE_MS = 2_000;
 /** Owns observation resources and the format-1 cursor, never actor ownership or dispatch policy. */
 export class ActorMeshMonitor {
   #timer: NodeJS.Timeout | undefined;
+  #dueTimer: NodeJS.Timeout | undefined;
+  #dueAt: number | undefined;
   #watcher: FSWatcher | undefined;
   #offset: number;
   #scheduled = false;
@@ -17,7 +19,8 @@ export class ActorMeshMonitor {
   #started = false;
 
   constructor(
-    readonly mesh: Pick<MeshStore, "root" | "latestOffset" | "tail">,
+    readonly mesh: Pick<MeshStore, "root" | "latestOffset" | "tail"> &
+      Partial<Pick<MeshStore, "nextScheduleDueAt" | "releaseDueSchedules">>,
     readonly config: Pick<FabricMeshConfig, "enabled" | "actorPollMs" | "maxReadEvents">,
     readonly callbacks: {
       cursorPath?: string | undefined;
@@ -38,7 +41,9 @@ export class ActorMeshMonitor {
     }
     try {
       const watcher = fs.watch(this.mesh.root, { persistent: false }, (_event, filename) => {
-        if (filename !== null && path.basename(filename.toString()) !== "events.jsonl") return;
+        const name = filename === null ? undefined : path.basename(filename.toString());
+        // schedules.json re-arms the due timer when another process schedules.
+        if (name !== undefined && name !== "events.jsonl" && name !== "schedules.json") return;
         this.schedule();
       });
       this.#watcher = watcher;
@@ -54,6 +59,8 @@ export class ActorMeshMonitor {
     this.#closed = true;
     if (this.#timer) clearInterval(this.#timer);
     this.#timer = undefined;
+    if (this.#dueTimer) clearTimeout(this.#dueTimer);
+    this.#dueTimer = undefined;
     this.#watcher?.close();
     this.#watcher = undefined;
   }
@@ -76,6 +83,22 @@ export class ActorMeshMonitor {
     this.schedule();
   }
 
+  // A schedule falling due changes no file, so wake at its due time instead of
+  // waiting for the reconcile interval.
+  #armDue(dueAt: number | undefined): void {
+    if (dueAt === this.#dueAt) return;
+    if (this.#dueTimer) clearTimeout(this.#dueTimer);
+    this.#dueTimer = undefined;
+    this.#dueAt = dueAt;
+    if (dueAt === undefined || this.#closed) return;
+    this.#dueTimer = setTimeout(() => {
+      this.#dueTimer = undefined;
+      this.#dueAt = undefined;
+      this.schedule();
+    }, Math.min(Math.max(0, dueAt - Date.now()), 2_147_000_000));
+    this.#dueTimer.unref();
+  }
+
   #startTimer(delay: number): void {
     if (this.#timer) clearInterval(this.#timer);
     this.#timer = setInterval(() => this.schedule(), delay);
@@ -87,6 +110,17 @@ export class ActorMeshMonitor {
     if (!this.callbacks.beforePoll()) return;
     this.#polling = true;
     try {
+      // Whichever process polls first releases due schedules; the store lock
+      // makes the release exactly-once, and this poll's tail then sees them.
+      // The lockless due check keeps an idle poll synchronous.
+      let dueAt: number | undefined;
+      try { dueAt = this.mesh.nextScheduleDueAt?.(); } catch { dueAt = undefined; }
+      if (dueAt !== undefined && dueAt <= Date.now()) {
+        await this.mesh.releaseDueSchedules?.().catch(() => undefined);
+        if (this.#closed) return;
+        try { dueAt = this.mesh.nextScheduleDueAt?.(); } catch { dueAt = undefined; }
+      }
+      this.#armDue(dueAt);
       const tail = this.mesh.tail(this.#offset, this.config.maxReadEvents);
       this.#offset = tail.nextOffset;
       for (const event of tail.events) this.callbacks.onEvent(event);

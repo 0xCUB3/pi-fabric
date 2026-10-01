@@ -131,7 +131,9 @@ import { AgentCompletionInbox } from "./agents/completion-inbox.js";
 import { ShellEventInbox } from "./core/shell-inbox.js";
 import { FabricShellTimingBridge } from "./core/shell-timing.js";
 import { readFabricBashMiddleware } from "./core/shell-middleware.js";
-import { DurableShellBridge } from "./jev-fabric/bridge.js";
+import { DurableShellBridge, JEV_FABRIC_START_MAX_MS } from "./jev-fabric/bridge.js";
+import { createMeshGrant, meshCliArgv, wrapDurableNotifyScript } from "./mesh/grants.js";
+import { assertPublicMeshTopic } from "./providers/mesh-provider.js";
 import { resolveInheritedSessionPins } from "./agents/session-pins.js";
 import { ResidencyClient } from "./residency/client.js";
 import { RESIDENT_HOST_FORMAT, residentRoot } from "./residency/protocol.js";
@@ -398,6 +400,26 @@ export class FabricRuntimeState {
         ownerId: context.sessionManager?.getSessionId?.(),
         settings: () => (this.#config ?? DEFAULT_FABRIC_CONFIG).executor.jevFabric,
         middleware: () => readFabricBashMiddleware(this.capturedTools.get("bash")?.definition),
+        notify: async ({ topic, kind, taskId, description }) => {
+          const mesh = this.#mesh;
+          if (!mesh || !this.#identity || !this.#config?.mesh.enabled) {
+            throw new Error("pi.bash notify requires an enabled Fabric mesh");
+          }
+          // One single-use grant per task; durable jobs end within 24 hours, so a
+          // week covers a late exit (max(task timeout, 7 days), within the 30-day cap).
+          const { token } = await createMeshGrant(mesh, {
+            topic: assertPublicMeshTopic(topic),
+            kind: kind ?? "task.completed",
+            ttlMs: Math.max(JEV_FABRIC_START_MAX_MS, 7 * 24 * 3_600_000),
+            uses: 1,
+            createdBy: this.#identity,
+          });
+          const argv = meshCliArgv();
+          return (command) => wrapDurableNotifyScript(command, {
+            argv, root: mesh.root, token, kind: kind ?? "task.completed", taskId,
+            ...(description !== undefined ? { description } : {}),
+          });
+        },
       });
     }
     this.#registry = new ActionRegistry(

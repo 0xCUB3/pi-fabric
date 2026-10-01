@@ -27,8 +27,10 @@ const stable = [
   "memory/file-worker.js",
   "memory/worker-provider.js",
   "providers/memory-provider.js",
+  "cli/index.js",
 ];
 const lazy = [
+  "cli/mesh.js",
   "agents/claude-cli.js",
   "agents/compact-control.js",
   "agents/result.js",
@@ -79,7 +81,7 @@ if (missing.length > 0) throw new Error(`Missing build artifacts:\n${missing.joi
 const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 const targets = (value) => typeof value === "string" ? [value]
   : value && typeof value === "object" ? Object.values(value).flatMap(targets) : [];
-for (const target of targets([manifest.main, manifest.types, manifest.exports, manifest.pi?.extensions])) {
+for (const target of targets([manifest.main, manifest.types, manifest.exports, manifest.pi?.extensions, manifest.bin])) {
   if (!target.startsWith("./dist/") || target.split("/").includes("..") || !existsSync(join(root, target))) {
     throw new Error(`Missing or unpackaged public entrypoint: ${target}`);
   }
@@ -147,6 +149,16 @@ const initialSource = [...startupFiles]
 for (const forbidden of ["src/fabric-runtime-state.ts", "src/prewalk/handoff.ts", "src/jev/client.ts", "src/ui/languages/bend.ts", "src/ui/settings.ts", "src/ui/conversation.ts", "src/ui/conversation-chrome.ts", 'from "mcporter"']) {
   if (initialSource.includes(forbidden)) {
     throw new Error(`Startup static graph contains lazy module marker: ${forbidden}`);
+  }
+}
+// The `pi-fabric` bin is standalone: an executable entry that never loads the extension.
+const cliEntry = join(dist, "cli/index.js");
+if (!readFileSync(cliEntry, "utf8").startsWith("#!/usr/bin/env node\n")) {
+  throw new Error("pi-fabric CLI entry lost its node shebang");
+}
+for (const file of [...staticClosure([cliEntry]), ...staticClosure([join(dist, "cli/mesh.js")])]) {
+  if (file === join(dist, "index.js") || readFileSync(file, "utf8").includes("src/fabric-runtime-state.ts")) {
+    throw new Error(`pi-fabric CLI statically reaches the extension graph: ${file}`);
   }
 }
 const lazyFiles = staticClosure(lazy.map((file) => join(dist, file)));

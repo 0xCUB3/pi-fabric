@@ -22,6 +22,18 @@ export interface DurableShellBridgeOptions {
   settings: () => DurableShellSettings;
   /** The active cooperative bash middleware, re-read on every use. */
   middleware: () => FabricBashMiddlewareV1 | undefined;
+  /**
+   * Prepares a completion notify for one task (mints its single-use mesh
+   * grant) and returns the launch-script wrapper; absent without a mesh.
+   */
+  notify?: ((request: DurableNotifyRequest) => Promise<(command: string) => string>) | undefined;
+}
+
+export interface DurableNotifyRequest {
+  topic: string;
+  kind?: string | undefined;
+  taskId: string;
+  description?: string | undefined;
 }
 
 /** jev-fabric's own `start` ceiling. */
@@ -102,17 +114,25 @@ export class DurableShellBridge {
   }
 
   /** Operations for a new durable job, recorded for re-adoption once started. */
-  async launch(job: FabricShellJobHandle, options: { shellPath?: string | undefined; label?: string | undefined; filtered: boolean; command: string; cwd: string; ownerId: string | undefined }): Promise<BashOperations> {
+  async launch(job: FabricShellJobHandle, options: { shellPath?: string | undefined; label?: string | undefined; filtered: boolean; command: string; cwd: string; ownerId: string | undefined; notify?: { topic: string; kind?: string | undefined } | undefined }): Promise<BashOperations> {
     const [{ registry, operations }, cli] = await Promise.all([this.#load(), this.#cli()]);
     const settings = this.options.settings();
     const home = this.home;
     const scriptDirectory = path.join(this.#stateDirectory, "durable-shell");
+    let wrapScript: ((command: string) => string) | undefined;
+    if (options.notify) {
+      if (!this.options.notify) throw new Error("pi.bash notify requires an enabled Fabric mesh");
+      wrapScript = await this.options.notify({
+        topic: options.notify.topic, kind: options.notify.kind, taskId: job.id, description: options.label,
+      });
+    }
     return operations.createJevFabricBashOperations({
       cli, taskId: job.id, scriptDirectory, detached: job.detached.signal,
       shellPath: options.shellPath,
       defaultTimeoutMs: Math.min(settings.timeoutMs, JEV_FABRIC_START_MAX_MS),
       maxTimeoutMs: JEV_FABRIC_START_MAX_MS,
       label: options.label,
+      wrapScript,
       onStarted: async (jobId, scriptPath) => {
         if (job.durable) job.durable.jobId = jobId;
         if (!options.ownerId) return;

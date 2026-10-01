@@ -25,12 +25,15 @@ const primaryEntryPoints = [
   "src/memory/file-worker.ts",
   "src/memory/worker-provider.ts",
   "src/providers/memory-provider.ts",
+  // Standalone `pi-fabric` bin; never reachable from the extension entry.
+  "src/cli/index.ts",
 ];
 
 // Every package-local dynamic import is also an entry point. Its stable output
 // path lets a session that loaded the previous index resolve delayed modules
 // after the installed package is replaced, while preserving lazy evaluation.
 const lazyEntryPoints = [
+  "src/cli/mesh.ts",
   "src/thinking-control.ts",
   "src/compaction/owner.ts",
   "src/compaction/orphan-repair.ts",

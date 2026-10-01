@@ -53,6 +53,15 @@ and reconnection.
 The host exits after its normal idle grace once it owns no live durable actor or
 running durable agent.
 
+[Scheduled mesh events](agents.md#scheduled-events) add one rule, computed by the
+pure `residentIdleDecision`: pending schedules on any topic keep the host alive
+while it owns at least one durable participant, and every idle check re-arms a
+wake timer to the earliest due time. At that time the host releases due schedules
+under the mesh lock, and its actor monitor delivers them. Pending schedules alone,
+with no durable participant, do not keep the host running; Fabric adds no system
+daemon, so such a schedule is released the next time any Fabric process touches
+the mesh root.
+
 ## Containers and PID namespaces
 
 `kill(pid, 0)` only answers within the caller's PID namespace and boot. In a

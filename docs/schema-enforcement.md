@@ -36,7 +36,7 @@ Under enforce mode, discovery and workflow display operations still work, along 
 - `pi.read`, `pi.grep`, `pi.find`, `pi.ls`;
 - `memory.recall`, `memory.expand`, `memory.sessions`;
 - `state.get`, `state.history`, `state.complexity`;
-- `mesh.self`, `mesh.read`, `mesh.members`, `mesh.get`, `mesh.list`;
+- `mesh.self`, `mesh.read`, `mesh.members`, `mesh.get`, `mesh.list`, `mesh.scheduled`, `mesh.grants`;
 - `decisions.list`;
 - `compact.status`, `thinking.status`;
 - `components.list`, `components.status`, `components.graph`;
