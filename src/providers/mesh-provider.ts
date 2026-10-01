@@ -10,7 +10,7 @@ import { FABRIC_PARTICIPANT_LIFECYCLE_TOPIC } from "../lifecycle/types.js";
 import { actionArgNormalizer } from "./arg-normalization.js";
 
 const emptySchema = { type: "object", properties: {}, additionalProperties: false };
-const INTERNAL_STATE_PREFIXES = ["topology/", "sessions/", "actors/", "residency/"];
+const INTERNAL_STATE_PREFIXES = ["topology/", "sessions/", "actors/", "residency/", "decisions/"];
 const PRIVATE_STATE_PREFIXES = ["residency/"];
 const INTERNAL_CONTROL_PREFIX = "fabric.control.";
 const INTERNAL_HOST_EVENT_TOPIC = "fabric.actor.host-event";

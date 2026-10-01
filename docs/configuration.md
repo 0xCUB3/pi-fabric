@@ -93,7 +93,9 @@ where absent values do not participate. Orchestration programs (`agents.run` / `
     "write": "allow",
     "execute": "allow",
     "network": "allow",
-    "agent": "allow"
+    "agent": "allow",
+    "headless": "deny",
+    "headlessTimeoutMs": 300000
   },
   "capture": {
     "enabled": true,
@@ -161,7 +163,9 @@ where absent values do not participate. Orchestration programs (`agents.run` / `
     "budgetUsd": 0,
     "maxTokensPerChild": 0,
     "sessionExport": true,
-    "sessionExportDir": ""
+    "sessionExportDir": "",
+    "childQuestions": "cancel",
+    "childQuestionTimeoutMs": 600000
   },
   "components": [
     {
@@ -390,6 +394,7 @@ Fabric risk classes are `read`, `write`, `execute`, `network`, and `agent`. Appr
 - Extension tool names appear in the prompt as a names-only roster; descriptions and schemas are resolved on demand via `tools.list` / `tools.search` / `tools.describe` before first use.
 - An `ask` policy emits a warning notification and opens an explicit **Allow once** / **Allow for this session** / **Deny** permission prompt. These options match Claude-style approval scopes. **Allow once** authorizes only the requested action. **Allow for this session** keeps that risk class authorized until the current Pi session ends. The TUI uses an inline wizard. RPC clients receive the equivalent `select` dialog.
 - Fabric serializes concurrent requests so a one-time approval never silently widens to sibling calls. Session-wide grants apply to native calls and to `fabric_exec`. Escape, dismissal, unavailable interactive UI, and session restart all fail closed.
+- `approvals.headless` (default `"deny"`) chooses what an approval does without an interactive UI. `"decision"` raises a durable user-held approval decision for `fabric_exec` actions and waits up to `approvals.headlessTimeoutMs` (default `300000`, bounded to 1 s..24 h). Only an explicit approve answer from `/fabric decisions` or `pi-fabric decisions answer` runs the action once; deny, cancel, expiry, and abort deny it. Any other value keeps `"deny"`. See [durable decisions](decisions.md#headless-approvals).
 
 ### Per-action approval overrides
 
@@ -503,6 +508,8 @@ Other agent settings:
 - `sessionExport`: export each agent run's usage as an attributed pi-format session file (on by default).
 - `sessionExportDir`: override the export store root (default `~/.pi-fabric/agent`, with `PI_FABRIC_AGENT_DIR` taking precedence).
 - `worktree.setup`: optional shell command run in each new `worktree: true` checkout before the child starts (unset by default; blank values are ignored). A per-request `worktreeSetup` overrides it, and a non-zero exit fails the launch. See [worktree results and setup](agents.md#transports).
+- `childQuestions`: `"cancel"` (default) cancels every dialog a Pi child opens; `"route"` forwards it to the parent's UI, or to a root-held [decision](decisions.md#routed-child-questions) when the parent has no UI.
+- `childQuestionTimeoutMs`: default deadline for a routed child dialog (default `600000`, bounded to 1 s..24 h); a dialog's own timeout wins.
 
 ### Usage tracking with external tools
 

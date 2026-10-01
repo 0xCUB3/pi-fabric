@@ -353,6 +353,7 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
         "kill",
         "repairs",
         "entropy",
+        "decisions",
       ];
       const idCommands = new Set([
         "messages",
@@ -601,6 +602,11 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
       }
       if (command === "chat") {
         await fabricUi.openConversation(context, argumentsList.join(" ") || undefined);
+        return;
+      }
+      if (command === "decisions") {
+        const { openFabricDecisions } = await import("../decisions/command.js");
+        await openFabricDecisions(state.mesh, context, argumentsList[0]);
         return;
       }
       if (command === "dashboard" || command === "ui") {
@@ -1196,7 +1202,7 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
       }
       if (command !== "status") {
         context.ui.notify(
-          "Usage: /fabric [status|dashboard|chat [id-or-name]|prewalk [task]|prewalk --off|--disable|--enable|reload|providers|agents|actors|global|import <name> [as <new>]|export <id> [--overwrite]|messages <id>|clear-messages <id>|events <id> [event...]|log <id>|export-log <id>|attach <id>|stop <id>|remove <id>|kill <id>|repairs|entropy]",
+          "Usage: /fabric [status|dashboard|chat [id-or-name]|prewalk [task]|prewalk --off|--disable|--enable|reload|providers|agents|actors|global|import <name> [as <new>]|export <id> [--overwrite]|messages <id>|clear-messages <id>|events <id> [event...]|log <id>|export-log <id>|attach <id>|stop <id>|remove <id>|kill <id>|repairs|entropy|decisions [id]]",
           "warning",
         );
         return;

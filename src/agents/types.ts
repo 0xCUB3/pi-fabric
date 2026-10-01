@@ -170,6 +170,8 @@ export interface AgentRunRecord {
   logFile?: string;
   nestedAgents?: AgentRunRecord[];
   pendingMessages?: { steering: string[]; followUp: string[] };
+  /** Set while a routed child dialog waits for an answer (status detail waiting_for_answer). */
+  blockedOn?: { decisionId?: string; since: number };
   compaction?: AgentCompactionStatus;
   /** Settlement diff summary of a worktree: true run; `worktree` stays the path. */
   worktreeResult?: AgentWorktreeResult;
@@ -253,6 +255,8 @@ export interface AgentWorkerOptions {
   runnerSessionId?: string;
   runRoot?: string;
   steerFile?: string;
+  /** Present when agents.childQuestions is "route": child dialogs go to the parent with this default deadline. */
+  childQuestionTimeoutMs?: number;
   transport: FabricAgentTransport;
   sessionId?: string;
   attachCommand?: string;
@@ -330,6 +334,23 @@ export interface AgentSteerEntry {
   data?: unknown;
   ts: number;
 }
+
+/** A routed child dialog (agents.childQuestions "route"); `question` is the raw worker payload. */
+export interface AgentChildQuestionRequest {
+  runId: string;
+  name: string;
+  actorId?: string;
+  question: Record<string, unknown>;
+  /** Aborted when the run settles; the router must stop asking. */
+  signal: AbortSignal;
+  /** Report the durable decision backing a headless question. */
+  onDecision(decisionId: string): void;
+}
+
+export type AgentChildQuestionResponse =
+  | { value: string }
+  | { confirmed: boolean }
+  | { cancelled: true };
 
 export interface AgentSteerResult {
   queued: true;

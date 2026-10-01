@@ -91,6 +91,8 @@ export class ApprovalController {
       decision?: FabricAutoApprovalDecision,
     ) => void,
     readonly brokeredNetwork?: (provider: string) => boolean,
+    /** approvals.headless "decision": resolve to true only on an explicit approve. */
+    readonly headless?: (action: ResolvedFabricAction, reason?: string) => Promise<boolean>,
   ) {}
 
   async approve(
@@ -171,6 +173,10 @@ export class ApprovalController {
     escalationReason?: string,
   ): Promise<void> {
     if (!this.context.hasUI) {
+      if (this.config.headless === "decision" && this.headless) {
+        if (await this.headless(action, escalationReason)) return;
+        throw new FabricTraceSafeError(`${action.ref} approval was denied, cancelled, or expired`);
+      }
       throw new FabricTraceSafeError(`${action.ref} requires approval, but no interactive UI is available`);
     }
 

@@ -45,6 +45,8 @@ import { ProcessTransport } from "./transports/process-transport.js";
 import { ScreenTransport } from "./transports/screen-transport.js";
 import { TmuxTransport } from "./transports/tmux-transport.js";
 import type {
+  AgentChildQuestionRequest,
+  AgentChildQuestionResponse,
   FabricBudgetSummary,
   FabricSteeringMode,
   FabricAgentLog,
@@ -106,6 +108,8 @@ import {
 } from "./constants.js";
 const NESTED_SNAPSHOT_POLL_MS = 500;
 const TRANSPORT_EXIT_GRACE_MS = 1_000;
+// agents.childQuestionTimeoutMs default: routed child dialogs cancel after 10 minutes.
+const DEFAULT_CHILD_QUESTION_TIMEOUT_MS = 600_000;
 const MAX_NAME_LENGTH = 60;
 const MAX_UI_TEXT_CHARS = 16_000;
 const MAX_UI_ERROR_CHARS = 8_000;
@@ -207,6 +211,9 @@ interface ManagedAgent extends AgentLifecycleState<AgentRunResult> {
   worktreeResult?: AgentWorktreeResult;
   nestedSnapshot?: AgentRunRecord[];
   nestedSnapshotAt?: number;
+  /** Routed child dialogs in flight; aborted at settlement. */
+  questions?: AbortController;
+  questionDecisionId?: string;
   latestRecord?: AgentRunRecord;
   latestUiRecord?: AgentRunRecord;
   background: boolean;
@@ -461,6 +468,9 @@ export class AgentManager {
   readonly #onBackgroundComplete: ((result: AgentRunResult) => void) | undefined;
   readonly #onResultConsumed: ((id: string) => void) | undefined;
   readonly #onLifecycle: ((event: FabricLifecyclePublishRequest) => void) | undefined;
+  readonly #onChildQuestion:
+    | ((request: AgentChildQuestionRequest) => Promise<AgentChildQuestionResponse>)
+    | undefined;
   readonly #preparePiModel:
     | ((model: string | undefined) => Promise<string | void>)
     | undefined;
@@ -518,6 +528,8 @@ export class AgentManager {
       onBackgroundComplete?: (result: AgentRunResult) => void;
       onResultConsumed?: (id: string) => void;
       onLifecycle?: (event: FabricLifecyclePublishRequest) => void;
+      /** agents.childQuestions "route": answer a child dialog via parent UI or a decision. */
+      onChildQuestion?: (request: AgentChildQuestionRequest) => Promise<AgentChildQuestionResponse>;
       preparePiModel?: (model: string | undefined) => Promise<string | void>;
       resolveHandoffCompactionBudget?: (model: string | undefined, cwd: string) => Promise<FabricCompactionBudget>;
       resolveParticipantGuidance?: AgentParticipantGuidanceResolver;
@@ -547,6 +559,7 @@ export class AgentManager {
     this.#onBackgroundComplete = options.onBackgroundComplete;
     this.#onResultConsumed = options.onResultConsumed;
     this.#onLifecycle = options.onLifecycle;
+    this.#onChildQuestion = options.onChildQuestion;
     this.#preparePiModel = options.preparePiModel;
     this.#resolveHandoffCompactionBudget = options.resolveHandoffCompactionBudget;
     this.#resolveParticipantGuidance = options.resolveParticipantGuidance;
@@ -985,6 +998,9 @@ export class AgentManager {
         path.join(runDirectory, "nested"),
         "--steer-file",
         steerFile,
+        ...(this.config.childQuestions === "route" && runner === "pi"
+          ? ["--child-questions", String(this.config.childQuestionTimeoutMs ?? DEFAULT_CHILD_QUESTION_TIMEOUT_MS)]
+          : []),
         ...(schemaFile ? ["--schema-file", schemaFile] : []),
         ...(branch ? ["--branch", branch] : []),
         ...(worktree ? ["--worktree", worktree] : []),
@@ -1714,6 +1730,7 @@ export class AgentManager {
     if (managed.worktreeResult) result.worktreeResult = managed.worktreeResult;
     this.#drainLifecycle(managed);
     if (!beginAgentSettlement(managed)) return;
+    managed.questions?.abort(new Error("Agent run settled"));
     // Images are transport inputs, not retained run artifacts. Startup retries
     // have finished by settlement, so remove the owner-only handoff file for
     // every terminal outcome even when retainRuns keeps the rest of the run.
@@ -1784,6 +1801,10 @@ export class AgentManager {
       try {
         const parsed = JSON.parse(line) as Record<string, unknown>;
         if (parsed.version !== 1 || typeof parsed.occurredAt !== "number") continue;
+        if (parsed.event === "question") {
+          this.#routeChildQuestion(managed, parsed.data);
+          continue;
+        }
         if (parsed.event === "tokens.usage") {
           if (!Object.prototype.hasOwnProperty.call(parsed, "data")) continue;
           const usage = tokenUsagePayloadFromValue(parsed.data);
@@ -1804,6 +1825,44 @@ export class AgentManager {
         // Ignore malformed worker lifecycle records; status monitoring remains authoritative.
       }
     }
+  }
+
+  // Answer one routed child dialog through the steer channel. Without a router
+  // (or on any router failure) the child gets a cancelled response.
+  #routeChildQuestion(managed: ManagedAgent, data: unknown): void {
+    if (typeof data !== "object" || data === null || typeof (data as { requestId?: unknown }).requestId !== "string") return;
+    const question = data as Record<string, unknown>;
+    const respond = (response: AgentChildQuestionResponse): void => {
+      try {
+        fs.appendFileSync(
+          path.join(managed.runDirectory, "steer.jsonl"),
+          `${JSON.stringify({ type: "ui_response", requestId: question.requestId, ...response, id: randomUUID(), ts: Date.now() })}\n`,
+          { encoding: "utf8", mode: 0o600 },
+        );
+      } catch {
+        // The worker's own deadline cancels the dialog if this write is lost.
+      }
+    };
+    if (!this.#onChildQuestion || managed.settled) {
+      respond({ cancelled: true });
+      return;
+    }
+    managed.questions ??= new AbortController();
+    void this.#onChildQuestion({
+      runId: managed.id,
+      name: managed.actorName ?? managed.name,
+      ...(managed.actorId ? { actorId: managed.actorId } : {}),
+      question,
+      signal: managed.questions.signal,
+      onDecision: (decisionId) => {
+        managed.questionDecisionId = decisionId;
+        this.#invalidateUiList();
+      },
+    }).catch((): AgentChildQuestionResponse => ({ cancelled: true })).then((response) => {
+      delete managed.questionDecisionId;
+      this.#invalidateUiList();
+      if (!managed.settled) respond(response);
+    });
   }
 
   #appendAttributedBudgetLedger(
@@ -2055,6 +2114,9 @@ export class AgentManager {
       ...(managed.branch ? { branch: managed.branch } : {}),
       ...(managed.worktree ? { worktree: managed.worktree } : {}),
       ...(managed.worktreeResult ? { worktreeResult: managed.worktreeResult } : {}),
+      ...(record.blockedOn && managed.questionDecisionId
+        ? { blockedOn: { ...record.blockedOn, decisionId: managed.questionDecisionId } }
+        : {}),
     };
   }
 }

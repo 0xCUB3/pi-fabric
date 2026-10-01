@@ -1400,6 +1400,22 @@ interface FabricThinkingApi {
   reset(): Promise<FabricThinkingStatus>;
 }
 
+interface FabricDecision {
+  id: string; kind: "approval" | "question" | "escalation"; title: string; body?: string;
+  options?: Array<{ id: string; label: string }>; input: "text" | "confirm" | "select" | "editor";
+  raisedBy: { participantId: string; runId?: string; sessionId?: string };
+  holder: string; createdAt: number; deadline?: number; onExpire: "cancel" | "default"; defaultOptionId?: string;
+  status: "open" | "answered" | "expired" | "cancelled";
+  answer?: { optionId?: string; text?: string; answeredBy: string; via: string; at: number };
+}
+interface FabricDecisionsApi {
+  raise(args: { title: string; kind?: FabricDecision["kind"]; body?: string; options?: Array<{ id: string; label: string }>; input?: FabricDecision["input"]; holder?: string; deadline?: number; timeoutMs?: number; onExpire?: "cancel" | "default"; defaultOptionId?: string }): Promise<{ id: string }>;
+  wait(args: { id: string; timeoutMs?: number }): Promise<FabricDecision>;
+  list(args?: { status?: FabricDecision["status"]; holder?: string; limit?: number }): Promise<FabricDecision[]>;
+  answer(args: { id: string; optionId?: string; text?: string }): Promise<FabricDecision>;
+  cancel(args: { id: string }): Promise<FabricDecision>;
+}
+
 interface FabricCompactApi {
   request(args?: {
     reason?: string;
@@ -1519,6 +1535,7 @@ declare const components: FabricComponentsApi;
 declare const compact: FabricCompactApi;
 declare const cache: FabricCacheApi;
 declare const thinking: FabricThinkingApi;
+declare const decisions: FabricDecisionsApi;
 declare const prewalk: FabricPrewalkApi;
 ${JEV_GUEST_DECLARATIONS}
 declare const council: FabricCouncilApi;

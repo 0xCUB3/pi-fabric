@@ -16,6 +16,7 @@ export const FABRIC_COMPONENT_PROVIDER_NAMES = [
   "mcp",
   "mesh",
   "state",
+  "decisions",
   "schema",
   "compact",
   "cache",

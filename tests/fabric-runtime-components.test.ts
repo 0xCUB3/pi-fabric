@@ -127,6 +127,7 @@ describe("Fabric runtime provider components", () => {
           "fabric.provider.agents",
           "fabric.provider.cache",
           "fabric.provider.compact",
+          "fabric.provider.decisions",
           "fabric.provider.extensions",
           "fabric.provider.jev",
           "fabric.provider.mcp",

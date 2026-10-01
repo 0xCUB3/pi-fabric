@@ -95,7 +95,7 @@ describe("scoped ownership and lifecycle finalization", () => {
   });
 });
 
-const families = ["agents", "cache", "compact", "components", "extensions", "jev", "mcp", "memory", "mesh", "pi", "prewalk", "schema", "sessions", "state", "tasks", "thinking"];
+const families = ["agents", "cache", "compact", "components", "decisions", "extensions", "jev", "mcp", "memory", "mesh", "pi", "prewalk", "schema", "sessions", "state", "tasks", "thinking"];
 describe("universal registry migration", () => {
   it("accounts for every built-in family and has no remaining raw dispatch in the registry", () => {
     const directory = new URL("../src/providers/", import.meta.url);

@@ -98,6 +98,10 @@ export interface FabricApprovalConfig {
   model?: string;
   /** Exact `provider.action` or `provider.*` → allow | ask | deny; exact beats wildcard beats risk mode. */
   actions?: Record<string, FabricActionApprovalMode>;
+  /** No-UI approvals: "deny" (absent, fail closed) or "decision" (await a durable user decision). */
+  headless?: "deny" | "decision";
+  /** Headless approval decision deadline; absent means 5 minutes. */
+  headlessTimeoutMs?: number;
 }
 
 /** Session-start background revalidation scope for the MCP descriptor cache:
@@ -213,6 +217,10 @@ export interface FabricAgentConfig {
   modelAdmission: FabricModelAdmission;
   /** Shell command run in each new agent worktree before the child starts. */
   worktree?: { setup?: string };
+  /** Child UI dialogs: "cancel" (absent) or "route" to the parent UI or a decision. */
+  childQuestions?: "cancel" | "route";
+  /** Routed child question deadline; absent means 10 minutes. */
+  childQuestionTimeoutMs?: number;
 }
 
 export interface FabricToolCaptureConfig {
@@ -1042,6 +1050,10 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
       agent: approvalMode(approvals.agent, DEFAULT_FABRIC_CONFIG.approvals.agent),
       ...(approvalModel ? { model: approvalModel } : {}),
       ...(approvalActions ? { actions: approvalActions } : {}),
+      ...(approvals.headless === "decision" ? { headless: "decision" as const } : {}),
+      ...(approvals.headlessTimeoutMs === undefined ? {} : {
+        headlessTimeoutMs: boundedInteger(approvals.headlessTimeoutMs, 300_000, 1_000, 86_400_000),
+      }),
     },
     mcp: {
       enabled: booleanValue(mcp.enabled, DEFAULT_FABRIC_CONFIG.mcp.enabled),
@@ -1196,6 +1208,10 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
       ...(stringValue(objectValue(agents.worktree).setup)
         ? { worktree: { setup: String(objectValue(agents.worktree).setup).trim() } }
         : {}),
+      ...(agents.childQuestions === "route" ? { childQuestions: "route" as const } : {}),
+      ...(agents.childQuestionTimeoutMs === undefined ? {} : {
+        childQuestionTimeoutMs: boundedInteger(agents.childQuestionTimeoutMs, 600_000, 1_000, 86_400_000),
+      }),
     },
     jev: normalizeJevConfig(input.jev),
     components: configuredComponents.map((entry) => structuredClone(entry)),

@@ -72,6 +72,8 @@ import { schemaRefAllowedInEnforce } from "./schema/policy.js";
 import { actionApprovalOverride } from "./core/approval-overrides.js";
 import type { FabricSpeculationStreamTap } from "./speculation/stream-tap.js";
 import { MeshStore, type MeshIdentity } from "./mesh/store.js";
+import { DecisionStore } from "./decisions/store.js";
+import { requestHeadlessApproval, routeChildQuestion } from "./decisions/host.js";
 import { LifecycleBroker } from "./lifecycle/broker.js";
 import type { FabricLifecycleEventType } from "./lifecycle/types.js";
 import { FabricControlPlane } from "./topology/control-plane.js";
@@ -188,6 +190,8 @@ export class FabricRuntimeState {
   #globalActors: GlobalActorRegistry | undefined;
   #mesh: MeshStore | undefined;
   #identity: MeshIdentity | undefined;
+  /** Durable decisions for headless approvals and routed child dialogs; mesh-enabled sessions only. */
+  #decisions: DecisionStore | undefined;
   #mainAgent: MainAgentController | undefined;
   #participants: ParticipantDirectory | undefined;
   #control: FabricControlPlane | undefined;
@@ -487,6 +491,7 @@ export class FabricRuntimeState {
       this.#registry.markUnavailable("jev", "Jev programs are unavailable in managed hosts");
       this.#registry.markUnavailable("cache", "Native prompt-cache access is unavailable in managed hosts");
       this.#registry.markUnavailable("thinking", "Host thinking control is unavailable in managed hosts");
+      this.#registry.markUnavailable("decisions", "Durable decisions are unavailable in managed hosts");
       // Closed-world hosts must never construct unused native managers, stores or model history.
       for (const name of ["agents", "schema", "compact", "memory", "mesh", "state"]) {
         if (["agents", "schema", "compact"].includes(name) || this.#managedHost.has(name)) {
@@ -557,6 +562,7 @@ export class FabricRuntimeState {
       pollMs: this.#config.mesh.actorPollMs,
     });
     await builtins.mesh(this.#config, this.#mesh, identity, this.#participants);
+    this.#decisions = this.#config.mesh.enabled ? new DecisionStore(this.#mesh, identity) : undefined;
     this.#schema = new SchemaController(
       context.cwd,
       this.#config.schema,
@@ -692,6 +698,8 @@ export class FabricRuntimeState {
       },
       onBackgroundComplete: (result) => completionInbox.enqueue(result),
       onResultConsumed: (id) => completionInbox.acknowledge(id),
+      onChildQuestion: (request) =>
+        routeChildQuestion(request, { context, ...(this.#decisions ? { store: this.#decisions } : {}) }),
     });
     const canManageActor = (actorId: string): boolean | undefined => {
       const participant = this.#participants?.get(actorId);
@@ -993,6 +1001,14 @@ export class FabricRuntimeState {
     );
     const events = this.pi.events;
     if (events) this.#execution.setEventEmitter((channel, data) => events.emit(channel, data));
+    const decisions = this.#decisions;
+    if (decisions) {
+      this.#execution.setHeadlessApproval((action, reason, signal) => requestHeadlessApproval(decisions, action, {
+        ...(reason ? { reason } : {}),
+        ...(this.#config?.approvals.headlessTimeoutMs ? { timeoutMs: this.#config.approvals.headlessTimeoutMs } : {}),
+        ...(signal ? { signal } : {}),
+      }));
+    }
     const discovery: FabricProviderDiscovery = {
       version: 1,
       register: (provider, options) => this.registerExternal(provider, options),

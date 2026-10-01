@@ -21,6 +21,7 @@ ActionRegistry ◀── staged commit ── ComponentSupervisor
     ├── compact.*
     ├── cache.* local observations + optional native warming leases
     ├── thinking.* bounded host-session reasoning effort
+    ├── decisions.* durable approvals and questions over the mesh
     ├── components.* kernel diagnostics and reload
     └── external providers
 

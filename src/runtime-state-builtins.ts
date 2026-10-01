@@ -15,6 +15,8 @@ import { isSelectedNativeMcpTool } from "./core/native-mcp-identity.js";
 import type { MemoryProviderContext } from "./providers/memory-provider.js";
 import { WorkerMemoryProvider } from "./memory/worker-provider.js";
 import { MeshProvider } from "./providers/mesh-provider.js";
+import { DecisionsProvider } from "./providers/decisions-provider.js";
+import { DecisionStore } from "./decisions/store.js";
 import { PiToolsProvider } from "./providers/pi-tools-provider.js";
 import { powerShellToolDefinitionFactory } from "./providers/pi-bash-cwd.js";
 import type { FabricShellJobStore } from "./core/shell-jobs.js";
@@ -140,11 +142,18 @@ export class RuntimeStateBuiltins {
         requires: ["mesh.get"],
         create: () => new StateProvider(mesh, identity, { schemaMode: config.schema.mode }),
       }));
+      await this.install(createProviderComponent({
+        provider: "decisions",
+        description: "Durable pending decisions over the project mesh",
+        requires: ["mesh.get"],
+        create: () => new DecisionsProvider(new DecisionStore(mesh, identity), identity),
+      }));
     } else {
       const meshDisabled =
         'disabled by configuration (mesh.enabled=false); set "mesh": { "enabled": true } in .pi/fabric.json or the agent fabric.json';
       this.registry.markUnavailable("mesh", `${meshDisabled} to enable mesh.* actions`);
       this.registry.markUnavailable("state", `${meshDisabled}; state.* actions run on the mesh`);
+      this.registry.markUnavailable("decisions", `${meshDisabled}; decisions.* actions run on the mesh`);
     }
   }
 
@@ -188,6 +197,7 @@ export class RuntimeStateBuiltins {
       ...(config.fullCodeMode && config.capture.enabled && config.schema.mode !== "enforce" ? ["extensions"] : []),
       "mcp",
       ...(config.mesh.enabled ? ["mesh", "state"] : ["mesh", "state"].filter((name) => this.managedHost?.has(name))),
+      ...(config.mesh.enabled && !this.managedHost ? ["decisions"] : []),
       "schema",
       "compact",
       ...(!this.managedHost ? ["cache", "thinking"] : []),

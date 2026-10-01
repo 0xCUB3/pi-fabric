@@ -155,6 +155,7 @@ See the [interface & commands reference](docs/interface.md) for every view, keyb
 - [Execution kernels](docs/kernels.md): exclusive TypeScript/Python selection, Monty sandboxing, CPython escape hatch, agent inheritance, and examples.
 - [Prompt cache](docs/prompt-cache.md): honest cache observations and optional, time-bounded native warming leases.
 - [Thinking control](docs/thinking.md): scoped host-session reasoning effort with configured bounds that children inherit and never widen.
+- [Durable decisions](docs/decisions.md): pending approvals and questions in the project mesh, headless approvals, routed child dialogs, `/fabric decisions`, and the `pi-fabric decisions` CLI.
 - [Memory & recall](docs/memory-recall.md): compact ranked hits, uniform follow calls, lossless expansion, and guest-local `memory.walk` computation.
 - [Interface & commands](docs/interface.md): dashboard, settings, keybindings, slash commands, and headless runs.
 - [Agents, actors & mesh](docs/agents.md): model handoff, `/fabric prewalk`, runners, transports, actors, councils, recursive queries, and durable coordination.

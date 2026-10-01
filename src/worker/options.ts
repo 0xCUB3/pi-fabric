@@ -108,6 +108,11 @@ export const parseWorkerOptions = (
   const ownerIdentityId = optional(args, "owner-identity-id");
   const runRoot = optional(args, "run-root");
   const steerFile = optional(args, "steer-file");
+  const childQuestions = optional(args, "child-questions");
+  const childQuestionTimeoutMs = childQuestions === undefined ? undefined : Number(childQuestions);
+  if (childQuestionTimeoutMs !== undefined && !(Number.isInteger(childQuestionTimeoutMs) && childQuestionTimeoutMs >= 1_000)) {
+    throw new Error("Invalid worker child-questions timeout");
+  }
   const branch = optional(args, "branch");
   const worktree = optional(args, "worktree");
   const writePolicy = optional(args, "write-policy");
@@ -207,6 +212,7 @@ export const parseWorkerOptions = (
     ...(runnerSessionId ? { runnerSessionId } : {}),
     ...(runRoot ? { runRoot } : {}),
     ...(steerFile ? { steerFile } : {}),
+    ...(childQuestionTimeoutMs !== undefined ? { childQuestionTimeoutMs } : {}),
     ...(branch ? { branch } : {}),
     ...(worktree ? { worktree } : {}),
     ...(writePolicy ? { writePolicy } : {}),

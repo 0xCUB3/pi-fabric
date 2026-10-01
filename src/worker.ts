@@ -59,6 +59,14 @@ const loadAgentResult = async (): Promise<AgentResultModule> => {
   return import(sourceModulePath) as Promise<AgentResultModule>;
 };
 
+type WorkerQuestionsModule = typeof import("./worker/questions.js");
+
+const loadWorkerQuestions = async (): Promise<WorkerQuestionsModule> => {
+  if (!import.meta.url.endsWith(".ts")) return import("./worker/questions.js");
+  const sourceModulePath = "./worker/questions.ts";
+  return import(sourceModulePath) as Promise<WorkerQuestionsModule>;
+};
+
 const loadWorkerOptions = async (): Promise<WorkerOptionsModule> => {
   if (!import.meta.url.endsWith(".ts")) return import("./worker/options.js");
   const sourceModulePath = "./worker/options.ts";
@@ -408,6 +416,18 @@ const main = async (): Promise<void> => {
   let retryPending = false;
 
   const update = (): void => updateRunRecord(options.statusFile, record);
+  // agents.childQuestions "route": child dialogs wait for a parent ui_response.
+  const questionRelay = options.childQuestionTimeoutMs !== undefined && options.runner === "pi" && options.steerFile
+    ? new (await loadWorkerQuestions()).ChildQuestionRelay(options.childQuestionTimeoutMs, {
+        emit: (question) => emitLifecycle("question", { ...question }),
+        send: (frame) => child.stdin?.write(`${JSON.stringify(frame)}\n`),
+        blocked: (since) => {
+          if (since === undefined) delete record.blockedOn;
+          else record.blockedOn = { since };
+          update();
+        },
+      })
+    : undefined;
   let killTimer: NodeJS.Timeout | undefined;
   let closeTimer: NodeJS.Timeout | undefined;
   const recoveryWatchdog = new PiRecoveryWatchdog((error) => failStalledChild(error));
@@ -903,7 +923,8 @@ const main = async (): Promise<void> => {
       const method = event.method;
       if (
         typeof event.id === "string" &&
-        (method === "select" || method === "confirm" || method === "input" || method === "editor")
+        (method === "select" || method === "confirm" || method === "input" || method === "editor") &&
+        !questionRelay?.request(event)
       ) {
         child.stdin?.write(
           `${JSON.stringify({ type: "extension_ui_response", id: event.id, cancelled: true })}\n`,
@@ -1098,7 +1119,7 @@ const main = async (): Promise<void> => {
         const line = raw.trim();
         if (!line) continue;
         processedCommands += 1;
-        let command: { type?: string; message?: string; mode?: string; instructions?: string };
+        let command: { type?: string; message?: string; mode?: string; instructions?: string; requestId?: string };
         try {
           command = JSON.parse(line);
         } catch {
@@ -1142,6 +1163,8 @@ const main = async (): Promise<void> => {
             child.stdin?.write(JSON.stringify({ type: "set_follow_up_mode", mode: command.mode }) + "\n");
           } else if (command.type === "compact") {
             compactControl.queue(command.instructions);
+          } else if (command.type === "ui_response") {
+            questionRelay?.respond(command);
           }
         } catch {
           /* stdin closed (settled/stopped child); a late steer is dropped */
@@ -1240,6 +1263,8 @@ const main = async (): Promise<void> => {
   });
 
   if (steerTimer) clearInterval(steerTimer);
+  questionRelay?.close();
+  delete record.blockedOn;
   if (claudeCloseTimer) clearTimeout(claudeCloseTimer);
   clearTimeout(timeout);
   if (killTimer) clearTimeout(killTimer);

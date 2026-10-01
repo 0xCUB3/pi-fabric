@@ -39,6 +39,7 @@ import {
   fabricActionListLimit,
   type FabricCallAudit,
   type FabricRegistryActivityEvent,
+  type ResolvedFabricAction,
 } from "./core/action-registry.js";
 import { semanticSearchActions } from "./core/semantic-search.js";
 import { resolveJevModelRoute } from "./jev/routes.js";
@@ -128,6 +129,12 @@ interface FabricExecutionPartial {
   progress?: string | undefined;
 }
 
+export type FabricHeadlessApproval = (
+  action: ResolvedFabricAction,
+  reason: string | undefined,
+  signal: AbortSignal | undefined,
+) => Promise<boolean>;
+
 export interface FabricExecutionAuthorizer {
   authorize(ref: string, parentToolCallId: string): Promise<void>;
 }
@@ -153,6 +160,7 @@ export class FabricExecutionService {
   #runtimeKind: string | undefined;
   #capabilityView: FabricCommittedCapabilityView | undefined;
   #emitEvent: ((channel: string, data: unknown) => void) | undefined;
+  #headlessApproval: FabricHeadlessApproval | undefined;
   constructor(
     readonly registry: ActionRegistry,
     readonly config: FabricConfig,
@@ -171,6 +179,11 @@ export class FabricExecutionService {
   /** Host event bus for observation-only events such as workflow item transitions. */
   setEventEmitter(emit: ((channel: string, data: unknown) => void) | undefined): void {
     this.#emitEvent = emit;
+  }
+
+  /** No-UI approval fallback used when approvals.headless is "decision". */
+  setHeadlessApproval(handler: FabricHeadlessApproval | undefined): void {
+    this.#headlessApproval = handler;
   }
 
   async execute(options: FabricExecutionOptions): Promise<FabricExecutionResult> {
@@ -319,6 +332,9 @@ export class FabricExecutionService {
       this.autoApprovalClassifier,
       recordAutoDecision,
       this.brokeredNetwork,
+      this.#headlessApproval
+        ? (action, reason) => this.#headlessApproval!(action, reason, options.signal)
+        : undefined,
     );
     const audits: FabricCallAudit[] = [];
     const phases: string[] = [];
