@@ -388,4 +388,40 @@ describe("dashboard snapshot agent ownership", () => {
     const snapshot = createDashboardSnapshot(fakeState([], [failed, running], [actor]), []);
     expect(snapshot.actors[0]?.worker?.id).toBe("actor-running");
   });
+
+  it("shows provider-registered participants as agent rows", () => {
+    const participant: FabricParticipantInfo = {
+      format: 1,
+      id: "provider:delegate:run-1",
+      kind: "provider",
+      provider: "delegate",
+      rootId: "session:test",
+      ownerHostId: "session:test",
+      ownerIdentityId: "session:test",
+      parentId: "session:test",
+      name: "Delegated run",
+      status: "running",
+      transport: "host",
+      capabilities: ["stop"],
+      startedAt: 10,
+      updatedAt: 20,
+      currentTool: "build: compiling",
+      controlProtocol: "v1",
+      local: true,
+      stale: false,
+    };
+    const snapshot = createDashboardSnapshot(fakeState([], [], [], [], [participant]), []);
+    expect(snapshot.agents).toEqual([
+      expect.objectContaining({
+        id: participant.id,
+        name: "Delegated run",
+        status: "running",
+        transport: "provider delegate",
+        currentTool: "build: compiling",
+        participantKind: "provider",
+        capabilities: ["stop"],
+      }),
+    ]);
+    expect(snapshot.agents[0]).not.toHaveProperty("runner");
+  });
 });

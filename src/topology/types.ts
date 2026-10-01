@@ -2,7 +2,8 @@ import type { FabricAgentRunner, FabricAgentTransport } from "../config.js";
 import type { MeshIdentity } from "../mesh/store.js";
 import type { AgentUsage } from "../agents/types.js";
 
-export type FabricParticipantKind = "root" | "agent" | "actor";
+/** `provider`: work a Fabric provider registered through `context.participants`. */
+export type FabricParticipantKind = "root" | "agent" | "actor" | "provider";
 export type FabricParticipantResidency = "session" | "durable";
 export type FabricParticipantScope = "local" | "lineage" | "project";
 export type FabricParticipantCapability =
@@ -30,7 +31,10 @@ export interface FabricParticipantRecord {
   label?: string;
   status: string;
   residency?: FabricParticipantResidency;
-  runner: FabricAgentRunner;
+  /** Absent only for `provider` participants, which have no agent runner. */
+  runner?: FabricAgentRunner;
+  /** Registering provider name for `provider` participants. */
+  provider?: string;
   transport: FabricAgentTransport | "host";
   capabilities: FabricParticipantCapability[];
   cwd?: string;

@@ -84,6 +84,7 @@ import type {
   FabricPeerInfo,
 } from "./topology/types.js";
 import { actorParticipantRecord, agentParticipantRecords } from "./topology/records.js";
+import { ProviderParticipantRegistry } from "./topology/provider-participants.js";
 import {
   PrewalkController,
   type FabricPrewalkPlanCheckpoint,
@@ -198,6 +199,7 @@ export class FabricRuntimeState {
   #decisions: DecisionStore | undefined;
   #mainAgent: MainAgentController | undefined;
   #participants: ParticipantDirectory | undefined;
+  #providerParticipants = new ProviderParticipantRegistry();
   #control: FabricControlPlane | undefined;
   #lifecycle: LifecycleBroker | undefined;
   #residency: ResidencyClient | undefined;
@@ -880,6 +882,10 @@ export class FabricRuntimeState {
     );
     this.#agents.subscribeUi(() => this.#participants?.scheduleRefresh());
     this.#actors.subscribe(() => this.#participants?.scheduleRefresh());
+    const providerParticipants = this.#providerParticipants;
+    this.#participants.registerSource(() =>
+      providerParticipants.records(mainAgentId, hostId, identity.id));
+    providerParticipants.subscribe(() => this.#participants?.scheduleRefresh());
     const agentsProvider = new AgentsProvider(
       this.#agents,
       this.#actors,
@@ -893,6 +899,7 @@ export class FabricRuntimeState {
       false,
       () => this.#config?.models ?? DEFAULT_FABRIC_CONFIG.models,
     );
+    agentsProvider.providerParticipants = providerParticipants;
     this.#agentsProvider = agentsProvider;
     this.#control.start((command, from, signal) =>
       agentsProvider.acceptControl(command, from, signal));
@@ -1025,6 +1032,7 @@ export class FabricRuntimeState {
       this.capturedTools,
       this.#managedHost ? (name) => this.#managedHost!.ownsProvider(name) : undefined,
     );
+    this.#execution.setParticipantRegistry(this.#providerParticipants);
     const events = this.pi.events;
     if (events) this.#execution.setEventEmitter((channel, data) => events.emit(channel, data));
     const decisions = this.#decisions;
@@ -1348,7 +1356,7 @@ export class FabricRuntimeState {
         name: self.name,
         kind: self.kind,
         rootId: self.rootId,
-        runner: self.runner,
+        runner: self.runner ?? "pi",
         ownerHostId: self.ownerHostId,
         ownerIdentityId: self.ownerIdentityId,
       },
@@ -1388,6 +1396,8 @@ export class FabricRuntimeState {
     });
     if (!withdrawn && generation !== undefined) return false;
     this.#externalProviders.delete(name);
+    // Detached participants outlive invocations but not their provider.
+    this.#providerParticipants.releaseProvider(name);
     return true;
   }
 
@@ -1417,6 +1427,7 @@ export class FabricRuntimeState {
     this.#suppressResidentGuidanceSync = true;
     await this.#deactivateRepairs();
     clearActiveCompiledSurface();
+    this.#releaseProviderParticipants();
     await this.#participants?.quiesce().catch(() => undefined);
     this.#stopComponentWatch?.();
     this.#stopComponentWatch = undefined;
@@ -1503,6 +1514,12 @@ export class FabricRuntimeState {
     });
   }
 
+  // Session teardown forgets provider participants; providers own their work.
+  #releaseProviderParticipants(): void {
+    this.#providerParticipants.releaseAll();
+    this.#providerParticipants = new ProviderParticipantRegistry();
+  }
+
   async #deactivateRepairs(): Promise<void> {
     const repairs = this.#repairs;
     this.#repairs = undefined;
@@ -1520,6 +1537,7 @@ export class FabricRuntimeState {
     await this.shellJobs.close();
     await this.#deactivateRepairs();
     if (!this.#registry) return;
+    this.#releaseProviderParticipants();
     await this.#participants?.quiesce().catch(() => undefined);
     this.#stopComponentWatch?.();
     this.#stopComponentWatch = undefined;

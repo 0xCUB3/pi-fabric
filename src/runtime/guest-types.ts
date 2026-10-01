@@ -157,14 +157,15 @@ type FabricParticipantCapability = "steer" | "followUp" | "stop" | "ask" | "acto
 interface FabricParticipantInfo {
   format: 1;
   id: string;
-  kind: FabricParticipantKind;
+  kind: FabricParticipantKind | "provider";
   rootId: string;
   ownerHostId: string;
   ownerIdentityId: string;
   parentId?: string;
   name: string;
   status: string;
-  runner: FabricAgentRunner;
+  runner?: FabricAgentRunner;
+  provider?: string;
   transport: FabricTransport | "host";
   capabilities: FabricParticipantCapability[];
   cwd?: string;

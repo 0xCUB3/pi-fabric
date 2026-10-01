@@ -28,7 +28,9 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 const participantKind = (value: unknown): FabricParticipantKind | undefined =>
-  value === "root" || value === "agent" || value === "actor" ? value : undefined;
+  value === "root" || value === "agent" || value === "actor" || value === "provider"
+    ? value
+    : undefined;
 
 const transports = new Set([
   "host",
@@ -63,7 +65,9 @@ const participantFromEntry = (entry: MeshStateEntry): FabricParticipantRecord | 
     entry.updatedBy.id !== value.ownerIdentityId ||
     typeof value.name !== "string" ||
     typeof value.status !== "string" ||
-    (value.runner !== "pi" && value.runner !== "claude" && value.runner !== "veda") ||
+    (kind === "provider"
+      ? value.runner !== undefined || typeof value.provider !== "string"
+      : value.runner !== "pi" && value.runner !== "claude" && value.runner !== "veda") ||
     typeof value.transport !== "string" ||
     !transports.has(value.transport) ||
     !Array.isArray(value.capabilities) ||

@@ -454,6 +454,46 @@ export interface FabricDynamicGuestDeclarations {
   extensions?: string;
 }
 
+/**
+ * Provider-owned work (for example a delegated run) registered with Fabric's
+ * participant directory under `provider:<provider>:<id>`. Non-detached
+ * participants are stopped when their fabric_exec program is cancelled or
+ * times out; detached ones survive until stopped, withdrawn, or shut down.
+ */
+export interface FabricParticipantSpec {
+  /** Unique per provider while unsettled; `[A-Za-z0-9][A-Za-z0-9._:-]{0,63}`. */
+  id: string;
+  label: string;
+  kind?: string;
+  detached?: boolean;
+  stop(reason: string): Promise<{ confirmed: boolean }>;
+  steer?(message: string): Promise<void>;
+  followUp?(message: string): Promise<void>;
+}
+
+export interface FabricParticipantProgress {
+  phase?: string;
+  message?: string;
+  /** Cumulative totals; each update replaces the previous usage. */
+  usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; cost?: number };
+}
+
+export interface FabricParticipantSettlement {
+  status: "completed" | "failed" | "stopped";
+  summary?: string;
+}
+
+export interface FabricParticipantHandle {
+  readonly ref: string;
+  update(progress: FabricParticipantProgress): void;
+  settle(result: FabricParticipantSettlement): void;
+  dispose(): void;
+}
+
+export interface FabricInvocationParticipants {
+  register(spec: FabricParticipantSpec): FabricParticipantHandle;
+}
+
 export interface FabricInvocationContext {
   cwd: string;
   signal: AbortSignal | undefined;
@@ -462,6 +502,8 @@ export interface FabricInvocationContext {
   extensionContext: ExtensionContext;
   update(message: string): void;
   activity?(update: FabricInvocationActivityUpdate): void;
+  /** Host-supplied inside fabric_exec: register provider-owned work as a participant. */
+  participants?: FabricInvocationParticipants;
   /** Host-supplied inside fabric_exec so agents.handoff schedules the outer-call boundary. */
   deferHandoff?(args: Record<string, unknown>): Record<string, unknown>;
   // Out-of-band image content blocks a provider (currently only pi.read of an

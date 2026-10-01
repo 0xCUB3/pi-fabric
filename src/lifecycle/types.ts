@@ -149,7 +149,7 @@ const participantKind = (value: unknown): FabricParticipantKind | undefined =>
 export const lifecycleSourceIdentity = (source: FabricLifecycleSource): MeshIdentity => ({
   id: source.id,
   name: source.name,
-  kind: source.kind === "root" ? "main" : source.kind,
+  kind: source.kind === "root" ? "main" : source.kind === "provider" ? "agent" : source.kind,
 });
 
 export const lifecycleEventFromMesh = (

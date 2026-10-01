@@ -51,6 +51,36 @@ async invoke(actionName, args, context) {
 }
 ```
 
+## Provider participants
+
+A provider that starts its own long-running work, such as a delegate that launches runs on another system, can register each run as a participant. Inside `fabric_exec`, `context.participants` is present (it is absent in other host contexts such as speculation, so check it):
+
+```ts
+async invoke(actionName, args, context) {
+  const run = await backend.start(args.task);
+  const participant = context.participants?.register({
+    id: run.id,                     // [A-Za-z0-9][A-Za-z0-9._:-]{0,63}, unique while unsettled
+    label: `Delegate ${run.id}`,    // shown in the widget and dashboard
+    kind: "delegate",
+    detached: actionName === "spawn",
+    stop: async (reason) => ({ confirmed: await backend.cancel(run.id, reason) }),
+    steer: async (message) => backend.message(run.id, message),
+  });
+  run.on("progress", (event) => participant?.update({ phase: event.step, message: event.note, usage: event.usage }));
+  if (actionName === "spawn") return { ref: participant?.ref };
+  const result = await run.done();
+  participant?.settle({ status: result.ok ? "completed" : "failed", summary: result.summary });
+  participant?.dispose();
+  return result;
+}
+```
+
+`register` returns a handle whose `ref` is `provider:<provider>:<id>`. Fabric binds the provider name, so a provider cannot register or control another provider's refs. `update` replaces the shown phase, message (at most 500 characters), and cumulative `usage` totals. `settle` records the terminal status once and later calls are ignored. `dispose` removes the participant. Invalid specs or progress throw.
+
+Registered participants appear in the participant directory with `kind: "provider"`, in `agents.members()`, and as agent rows in the activity widget and dashboard. `agents.stop`, `agents.steer`, and `agents.followUp` accept the ref, as do the dashboard and conversation controls. They call the provider's callbacks. A missing `steer` or `followUp` callback, or a `data` payload, fails with a clear error. `agents.stop` returns `{ ref, outcome: "confirmed" | "unconfirmed", detail? }`. With `mesh.enabled`, other sessions reach the participant through the owner's control plane.
+
+Owned-work cancellation: when the `fabric_exec` program that registered a non-detached participant is cancelled or times out, Fabric calls `stop("program_cancelled")` on each of its unsettled participants in parallel, within one 5 second total bound. Each outcome is `confirmed` when the callback resolves `{ confirmed: true }`, otherwise `unconfirmed` with `detail` `declined`, `error`, or `timeout`. Fabric records the outcomes as [`fabric.participant.stop`](audit-trace.md#owned-work-stops) trace operations and in the tool result. A program that completes normally leaves its participants to the provider. Detached participants survive the invocation and stop only when asked. Fabric releases every participant of a provider, without calling `stop`, when that provider withdraws or the session shuts down; their handles then do nothing.
+
 ## Withdrawing a direct registration
 
 An extension withdraws a provider it registered directly by emitting `FABRIC_PROVIDER_WITHDRAW_EVENT` (`pi-fabric:provider:withdraw:v1`):
@@ -61,7 +91,7 @@ import { FABRIC_PROVIDER_WITHDRAW_EVENT, type FabricProviderWithdrawalV1 } from 
 pi.events.emit(FABRIC_PROVIDER_WITHDRAW_EVENT, { name: "example" } satisfies FabricProviderWithdrawalV1);
 ```
 
-Fabric retires the current binding and drops its owner hold, the same path a component lease takes. New calls to `example.*` are refused immediately. Work already admitted and committed capability views that pinned the old generation drain under the [retained-generation rules](provider-capabilities.md#capability-views). The extension owns the provider instance, so Fabric does not call `close()` on withdrawal. Fabric also forgets the registration and does not remount it on reload; an extension that answers `FABRIC_PROVIDER_DISCOVER_EVENT` must stop registering there too. Register again with `FABRIC_PROVIDER_REGISTER_EVENT` at any time.
+Fabric retires the current binding and drops its owner hold, the same path a component lease takes. It also releases the provider's [participants](#provider-participants), detached ones included. New calls to `example.*` are refused immediately. Work already admitted and committed capability views that pinned the old generation drain under the [retained-generation rules](provider-capabilities.md#capability-views). The extension owns the provider instance, so Fabric does not call `close()` on withdrawal. Fabric also forgets the registration and does not remount it on reload; an extension that answers `FABRIC_PROVIDER_DISCOVER_EVENT` must stop registering there too. Register again with `FABRIC_PROVIDER_REGISTER_EVENT` at any time.
 
 Optional `generation` pins the withdrawal to one binding: a number matches the binding generation, a string matches the provider binding id (`providerBindingId` in a committed view). Unknown names, generation mismatches, component-owned providers, and managed-host providers are ignored; set `PI_FABRIC_DEBUG=1` to log ignored withdrawals. Component-owned providers withdraw through their component lifecycle.
 

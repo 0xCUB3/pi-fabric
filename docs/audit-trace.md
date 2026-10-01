@@ -98,6 +98,10 @@ The shared guest implementation instruments calls to `workflow.parallel` and `wo
 
 Guest span IDs are deterministic execution-local bridge correlation values. Fabric never persists them, and the internal start/end bridge stays closure-private, outside the guest API. Internal span calls skip provider resolution, authorization, approval, and agent-budget accounting. A thrown stage closes active spans as failed. A runtime failure, deadline, or cancellation seals any still-open operation with the typed final execution outcome.
 
+### Owned-work stops
+
+When a program is cancelled or times out, Fabric stops the [provider participants](providers.md#provider-participants) it owns and records one `fabric.participant.stop` operation per participant after the program's own operations. Arguments keep the identifier-shaped `ref` and `reason` (`program_cancelled`). The result keeps `outcome` (`confirmed` or `unconfirmed`) and, for an unconfirmed stop, `detail` (`declined`, `error`, or `timeout`). A confirmed stop succeeds and an unconfirmed one fails at the `invoke` stage.
+
 Traces retain only plain local paths. They drop URL paths, together with credentials and query/fragment data. Plain paths lose their query/fragment suffixes as well. Sensitive-key normalization, media/base64 rejection, JSON safety, depth/node limits, and UTF-8 truncation still run after projection and add defense in depth. Projection provides the primary secrecy mechanism.
 
 Identifiers (`ref`, `provider`, `action`), outcomes, failure stage, operation sequence, and occurrence-ordered phase labels stay durable. These fields, the retained local paths and mesh addresses, and bash command text are not secret containers. Callers must never place credentials in identifiers, local filenames, topics, keys, phase names, or commands.

@@ -14,6 +14,12 @@ import type {
   FabricMainAgentTarget,
 } from "../main-agent.js";
 import type { MeshIdentity } from "../mesh/store.js";
+import {
+  acceptProviderParticipantControl,
+  controlProviderParticipant,
+  isProviderParticipantRef,
+  type ProviderParticipantRegistry,
+} from "../topology/provider-participants.js";
 import { LifecycleBroker } from "../lifecycle/broker.js";
 import {
   DEFAULT_LIFECYCLE_COALESCE_MS,
@@ -334,6 +340,8 @@ export class AgentsProvider implements FabricProvider {
   readonly #transcripts = new AgentTranscriptReader();
   readonly #router: AgentMessageRouter;
   readonly name = "agents";
+  /** Session registry of `provider:` participants; stop/steer/followUp route there. */
+  providerParticipants: ProviderParticipantRegistry | undefined;
   readonly description =
     "The user-facing Main target, one-shot Pi or Claude Code agents, and persistent mailbox actors over process, tmux, screen, LocalTerm, or Herdr";
 
@@ -1154,6 +1162,11 @@ export class AgentsProvider implements FabricProvider {
       binding?: FabricActorRunBinding;
     } = {},
   ): Promise<FabricAgentMessageResult> {
+    if (isProviderParticipantRef(id)) {
+      return controlProviderParticipant(
+        this.providerParticipants, this.participants, this.control, id, kind, message, data,
+      ) as Promise<FabricAgentMessageResult>;
+    }
     return this.#router.routeMessage(id, message, data, kind, context, options);
   }
 
@@ -1177,6 +1190,9 @@ export class AgentsProvider implements FabricProvider {
     from: MeshIdentity,
     signal?: AbortSignal,
   ): Promise<FabricControlAcceptance> {
+    if (isProviderParticipantRef(command.targetId)) {
+      return acceptProviderParticipantControl(this.providerParticipants, command);
+    }
     return this.#router.acceptControl(command, from, signal);
   }
 
@@ -1328,6 +1344,9 @@ export class AgentsProvider implements FabricProvider {
   }
 
   async stopParticipant(id: string): Promise<unknown> {
+    if (isProviderParticipantRef(id)) {
+      return controlProviderParticipant(this.providerParticipants, this.participants, this.control, id, "stop");
+    }
     try {
       const result = await this.manager.stop(id);
       this.participants.scheduleRefresh();

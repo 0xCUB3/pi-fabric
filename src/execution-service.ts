@@ -66,6 +66,11 @@ import type {
   FabricSandboxTerminationReason,
 } from "./runtime/kernel.js";
 import type { TypeScriptKernelRuntime } from "./runtime/typescript-kernel.js";
+import {
+  PROGRAM_CANCELLED_REASON,
+  type ProviderParticipantRegistry,
+  type ProviderParticipantStopOutcome,
+} from "./topology/provider-participants.js";
 import type { FabricTypeError, FabricTypeCheckResult } from "./runtime/type-checker.js";
 
 const executionOutcomeFromTermination = (
@@ -104,6 +109,22 @@ const aggregateUsage = (usages: Usage[]): Usage => ({
   },
 });
 
+// Each stop becomes a synthetic trace call whose projection keeps only the ref,
+// reason, and outcome; a confirmed stop succeeds, an unconfirmed one fails.
+const stopOwnedWork = async (
+  participants: ProviderParticipantRegistry,
+  invocationId: string,
+  trace: FabricExecutionTraceRecorder,
+): Promise<ProviderParticipantStopOutcome[]> => {
+  const outcomes = await participants.cancelInvocation(invocationId, PROGRAM_CANCELLED_REASON);
+  for (const stop of outcomes) {
+    const operation = trace.issueCall("fabric.participant.stop", { ref: stop.ref, reason: PROGRAM_CANCELLED_REASON });
+    if (stop.outcome === "confirmed") operation.succeed(stop);
+    else operation.fail("invoke", undefined, "failed", stop);
+  }
+  return outcomes;
+};
+
 export interface FabricExecutionResult {
   success: boolean;
   kernel?: FabricKernel;
@@ -121,6 +142,8 @@ export interface FabricExecutionResult {
   error?: string;
   handoffRequest?: Record<string, unknown>;
   usage?: Usage;
+  /** Stop outcomes for owned provider participants after cancellation or timeout. */
+  ownedWork?: ProviderParticipantStopOutcome[];
 }
 
 interface FabricExecutionPartial {
@@ -161,6 +184,7 @@ export class FabricExecutionService {
   #capabilityView: FabricCommittedCapabilityView | undefined;
   #emitEvent: ((channel: string, data: unknown) => void) | undefined;
   #headlessApproval: FabricHeadlessApproval | undefined;
+  #participants: ProviderParticipantRegistry | undefined;
   constructor(
     readonly registry: ActionRegistry,
     readonly config: FabricConfig,
@@ -179,6 +203,11 @@ export class FabricExecutionService {
   /** Host event bus for observation-only events such as workflow item transitions. */
   setEventEmitter(emit: ((channel: string, data: unknown) => void) | undefined): void {
     this.#emitEvent = emit;
+  }
+
+  /** Session registry behind `context.participants` and owned-work cancellation. */
+  setParticipantRegistry(registry: ProviderParticipantRegistry | undefined): void {
+    this.#participants = registry;
   }
 
   /** No-UI approval fallback used when approvals.headless is "decision". */
@@ -546,8 +575,15 @@ export class FabricExecutionService {
         );
         throw error;
       }
+      const participants = this.#participants;
+      const separator = ref.indexOf(".");
       return this.registry.invoke(ref, args, {
         ...callContext,
+        // The registry resolves `provider.action` by this exact prefix, so the
+        // view is bound to the provider that receives it.
+        ...(participants && separator > 0
+          ? { participants: participants.view(ref.slice(0, separator), options.parentToolCallId) }
+          : {}),
         ...(ref === "agents.handoff"
           ? {
               deferHandoff(request: Record<string, unknown>) {
@@ -943,6 +979,9 @@ export class FabricExecutionService {
       const message = error instanceof Error ? error.message : String(error);
       this.activity?.finish(options.parentToolCallId, false, message);
       itemTransitions.finish(false);
+      if (options.signal?.aborted) {
+        await this.#participants?.cancelInvocation(options.parentToolCallId).catch(() => undefined);
+      }
       throw error;
     } finally {
       await this.registry.endInvocation(options.parentToolCallId);
@@ -955,6 +994,15 @@ export class FabricExecutionService {
     }
     const runOutcome = executionOutcomeFromTermination(sandboxResult.terminationReason);
     const succeeded = runOutcome === "succeeded";
+    const ownedWork = (runOutcome === "aborted" || runOutcome === "timed_out") && this.#participants
+      ? await stopOwnedWork(this.#participants, options.parentToolCallId, traceRecorder)
+      : [];
+    if (ownedWork.length > 0) {
+      const summary = `Owned work stopped: ${ownedWork
+        .map((stop) => `${stop.ref} ${stop.outcome}${stop.detail ? ` (${stop.detail})` : ""}`)
+        .join("; ")}`;
+      sandboxResult.error = sandboxResult.error ? `${sandboxResult.error}\n${summary}` : summary;
+    }
     this.activity?.finish(options.parentToolCallId, succeeded, sandboxResult.error);
     itemTransitions.finish(succeeded);
     // Logs, results, and error text reach the model, the event stream, and
@@ -976,6 +1024,7 @@ export class FabricExecutionService {
       elapsedMs: performance.now() - startedAt,
       ...(sandboxResult.error ? { error: sanitizeFabricMediaText(sandboxResult.error) } : {}),
       ...(handoffRequest ? { handoffRequest } : {}),
+      ...(ownedWork.length > 0 ? { ownedWork } : {}),
       ...(classifierUsages.length > 0
         ? { usage: aggregateUsage(classifierUsages) }
         : {}),
