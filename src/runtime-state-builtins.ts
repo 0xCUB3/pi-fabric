@@ -138,7 +138,7 @@ export class RuntimeStateBuiltins {
         provider: "state",
         description: "Labeled world state over the project mesh",
         requires: ["mesh.get"],
-        create: () => new StateProvider(mesh, identity),
+        create: () => new StateProvider(mesh, identity, { schemaMode: config.schema.mode }),
       }));
     } else {
       const meshDisabled =

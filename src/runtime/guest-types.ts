@@ -1103,6 +1103,9 @@ interface FabricStateVerificationResult {
   reportingError?: string;
   evidenceDigest: string;
   resultDigest: string;
+  binding?: Record<string, string>;
+  observed?: { commit?: string; dirty?: boolean };
+  requestedBy?: "program" | "host";
 }
 interface FabricStateApi {
   transition(args: FabricStateTransitionArgs): Promise<{ event: FabricMeshEvent; head: unknown }>;
@@ -1119,7 +1122,7 @@ interface FabricStateApi {
     certifications: unknown[];
   }>;
   complexity(args?: { files?: string[]; paths?: string[] }): Promise<{ files: FabricStateComplexityFile[]; netDelta: number }>;
-  verify(args?: { labels?: string[]; includeArchived?: boolean; timeoutMs?: number; label?: string }): Promise<FabricStateVerificationResult>;
+  verify(args?: { labels?: string[]; includeArchived?: boolean; timeoutMs?: number; label?: string; binding?: Record<string, string> }): Promise<FabricStateVerificationResult>;
   goal(args: { check: string; description?: string; command?: string; cmd?: string; predicate?: string }): Promise<FabricMeshStateEntry<{ check: string; description?: string }>>;
   checkGoal(args?: { timeoutMs?: number }): Promise<{
     passed: boolean;

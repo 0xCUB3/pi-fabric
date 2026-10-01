@@ -74,7 +74,7 @@ All calls return promises. Fields ending in `?` are optional; `unknown` marks pr
 | `state.get()` | `{head,goal,complexity,certification,recentLabels:string[]}` |
 | `state.history(args?)` | `{transitions:unknown[],labels:string[],certifications:unknown[]}` |
 | `state.complexity(args?)` | `{files:ComplexityFile[],netDelta:number}` |
-| `state.verify(args?)` | `{certified,violated,certificationStatus,results,failures,certificate?,reportingError?,evidenceDigest,resultDigest}` |
+| `state.verify(args?)` | `{certified,violated,certificationStatus,results,failures,certificate?,reportingError?,evidenceDigest,resultDigest,binding?,observed?,requestedBy}`; `args.binding` (`{commit?,specDigest?,...}`) binds the certificate, and a commit that differs from git HEAD fails closed |
 | `state.goal(args)` | mesh state entry `{key,value,version,updatedAt,updatedBy}` |
 | `state.checkGoal(args?)` | `{passed:boolean,output:string,exitCode:number\|null,error?}` |
 | `schema.status()` | `{mode,certificateTtlMs,maxFiles,maxBytes,trustedCommands,generation,lastOutcome,hypotheses}` |
