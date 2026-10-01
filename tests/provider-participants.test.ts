@@ -291,7 +291,8 @@ describe("owned-work cancellation in fabric_exec", () => {
       context,
       onPartial() {},
     });
-    await vi.waitFor(() => expect(handles).toHaveLength(3));
+    // The first program type-checks before it runs; slow CI hosts need more than the 1 s default.
+    await vi.waitFor(() => expect(handles).toHaveLength(3), { timeout: 10_000 });
     controller.abort();
     const result = await running;
 
@@ -419,7 +420,7 @@ describe("Fabric runtime provider participants", () => {
       expect(started.success, started.error).toBe(true);
       expect(started.value).toBe("provider:delegate:one");
       await vi.waitFor(() => expect(runtime.participantInfos().map((participant) => participant.id))
-        .toEqual(expect.arrayContaining(["provider:delegate:one", "provider:delegate:two"])));
+        .toEqual(expect.arrayContaining(["provider:delegate:one", "provider:delegate:two"])), { timeout: 10_000 });
 
       await runtime.queueUserMessage("provider:delegate:one", "focus", "steer");
       expect(steer).toHaveBeenCalledWith("focus");
@@ -435,7 +436,7 @@ describe("Fabric runtime provider participants", () => {
 
       expect(runtime.withdrawExternal("delegate")).toBe(true);
       await vi.waitFor(() => expect(runtime.participantInfos().map((participant) => participant.id))
-        .not.toContain("provider:delegate:two"));
+        .not.toContain("provider:delegate:two"), { timeout: 10_000 });
       await expect(runtime.stopParticipant("provider:delegate:two")).rejects.toThrow("Unknown Fabric participant");
     } finally {
       await runtime.shutdown();
