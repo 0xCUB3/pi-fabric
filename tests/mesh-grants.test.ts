@@ -8,6 +8,7 @@ import {
   createMeshGrant,
   listMeshGrants,
   meshCliArgv,
+  meshPostCommand,
   MESH_GRANT_TOKEN_ENV,
   postWithMeshGrant,
   revokeMeshGrant,
@@ -105,16 +106,31 @@ describe("scoped external mesh grants", () => {
       grantId: string; token: string; expiresAt: number; uses: number; command: string;
     };
     expect(granted).toMatchObject({ uses: 1, expiresAt: expect.any(Number) });
-    expect(granted.command).toContain(`${MESH_GRANT_TOKEN_ENV}='${granted.token}'`);
+    const windows = process.platform === "win32";
+    expect(granted.command).toContain(`${windows ? "$env:" : ""}${MESH_GRANT_TOKEN_ENV}='${granted.token}'`);
     expect(granted.command).toContain("mesh post --root");
     expect((await provider.describe("grant", context))?.risk).toBe("network");
     expect((await provider.describe("revoke", context))?.risk).toBe("write");
     await expect(provider.invoke("grants", {}, context)).resolves.toEqual([expect.not.objectContaining({ token: expect.anything() })]);
     // Run the returned line through a shell, as an outside process would.
-    const shell = spawnSync("/bin/sh", ["-c", granted.command], { encoding: "utf8", timeout: 30_000 });
+    const shell = windows
+      ? spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", granted.command], { encoding: "utf8", timeout: 30_000 })
+      : spawnSync("/bin/sh", ["-c", granted.command], { encoding: "utf8", timeout: 30_000 });
     expect(shell.status, shell.stderr).toBe(0);
     expect(mesh.read({ topic: "inbox" })).toEqual([expect.objectContaining({ kind: "note", untrusted: true, data: {} })]);
     await expect(provider.invoke("revoke", { grantId: granted.grantId }, context)).resolves.toEqual({ revoked: true });
+  });
+});
+
+describe("mesh post command line", () => {
+  it("quotes for a POSIX shell and for PowerShell on Windows", () => {
+    const input = { root: "C:\\mesh root", token: "t'k", kind: "note" };
+    expect(meshPostCommand(["node", "cli/index.js"], input, "linux")).toBe(
+      `${MESH_GRANT_TOKEN_ENV}='t'\\''k' 'node' 'cli/index.js' mesh post --root 'C:\\mesh root' --kind 'note' --data '{}'`,
+    );
+    expect(meshPostCommand(["node.exe", "cli\\index.js"], input, "win32")).toBe(
+      `$env:${MESH_GRANT_TOKEN_ENV}='t''k'; & 'node.exe' 'cli\\index.js' mesh post --root 'C:\\mesh root' --kind 'note' --data '{}'`,
+    );
   });
 });
 

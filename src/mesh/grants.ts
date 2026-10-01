@@ -249,17 +249,31 @@ export const meshCliArgv = (moduleUrl = import.meta.url): string[] => {
   return ["pi-fabric"];
 };
 
-/** A ready-to-run `mesh post` line with the token in the environment, not argv. */
+const powershellQuote = (value: string): string => `'${value.replaceAll("'", "''")}'`;
+
+/**
+ * A ready-to-run `mesh post` line with the token in the environment, not argv:
+ * POSIX shell syntax, or PowerShell on Windows where no POSIX shell is assumed.
+ */
 export const meshPostCommand = (
   argv: readonly string[],
   input: { root: string; token: string; kind?: string },
-): string => [
-  `${MESH_GRANT_TOKEN_ENV}=${shellQuote(input.token)}`,
-  ...argv.map(shellQuote),
-  "mesh", "post", "--root", shellQuote(input.root),
-  ...(input.kind !== undefined ? ["--kind", shellQuote(input.kind)] : []),
-  "--data", shellQuote("{}"),
-].join(" ");
+  platform: NodeJS.Platform = process.platform,
+): string => {
+  const quote = platform === "win32" ? powershellQuote : shellQuote;
+  const [program = "pi-fabric", ...rest] = argv;
+  const invocation = [
+    ...(platform === "win32" ? ["&"] : []),
+    quote(program),
+    ...rest.map(quote),
+    "mesh", "post", "--root", quote(input.root),
+    ...(input.kind !== undefined ? ["--kind", quote(input.kind)] : []),
+    "--data", quote("{}"),
+  ].join(" ");
+  return platform === "win32"
+    ? `$env:${MESH_GRANT_TOKEN_ENV}=${quote(input.token)}; ${invocation}`
+    : `${MESH_GRANT_TOKEN_ENV}=${quote(input.token)} ${invocation}`;
+};
 
 /**
  * Wraps a durable task script so its exit publishes one notify event through
