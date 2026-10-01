@@ -53,14 +53,16 @@ import {
   fabricModelContext,
   FabricToolLifecycle,
   FabricToolOwnership,
+  fabricToolPlacement,
   ownsFabricToolSource,
 } from "./core/tool-ownership.js";
+import { readChildToolAllowlist } from "./core/child-tool-allowlist.js";
 import {
   expandSkillDirMarkersForRead,
   expandSkillDirMarkersInSkillBlock,
 } from "./core/skill-dir.js";
 import { coreOverridePromptGuidance } from "./core/core-override-guidance.js";
-import { PI_CORE_TOOL_NAMES } from "./core/pi-tools.js";
+import { PI_CORE_TOOL_NAMES, PI_CORE_TOOL_NAME_SET } from "./core/pi-tools.js";
 import {
   fabricExecutionKernelGuidance,
   defaultFabricExecutionGuidance,
@@ -93,8 +95,13 @@ import { piHostCompatibilityWarning } from "./host-compatibility.js";
 import {
   FABRIC_COMPONENT_REGISTER_EVENT,
   FABRIC_PROVIDER_REGISTER_EVENT,
+  FABRIC_PROVIDER_WITHDRAW_EVENT,
+  FABRIC_TOOL_PLACEMENT_EVENT,
+  readFabricProviderWithdrawalV1,
+  readFabricToolPlacementRequestV1,
   type FabricComponentRegistration,
   type FabricProviderRegistration,
+  type FabricToolPlacementMode,
 } from "./protocol.js";
 import type { AgentToolResultMessage } from "./agents/types.js";
 import { FabricUiController } from "./ui/controller.js";
@@ -250,6 +257,56 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
         registration.provider,
         registration.overwrite === undefined ? {} : { overwrite: registration.overwrite },
       );
+    },
+  );
+
+  // Direct registrations only: component-owned providers withdraw through
+  // their component lease. Unknown names and generation mismatches are no-ops.
+  const unsubscribeProviderWithdrawal = pi.events.on(
+    FABRIC_PROVIDER_WITHDRAW_EVENT,
+    (value: unknown) => {
+      const withdrawal = readFabricProviderWithdrawalV1(value);
+      if (!withdrawal) throw new Error("Invalid Pi Fabric provider withdrawal");
+      if (!state.withdrawExternal(withdrawal.name, withdrawal.generation) && process.env.PI_FABRIC_DEBUG) {
+        console.debug(`[pi-fabric] ignored provider withdrawal: ${withdrawal.name}`);
+      }
+    },
+  );
+
+  // Synchronous reachability answer so extensions stop guessing whether the
+  // model or a fabric_exec program can reach a tool this turn.
+  const programReachable = (registered: ReadonlySet<string>): ((name: string) => boolean) => {
+    if (!state.initialized) return () => false;
+    const allowlist = readChildToolAllowlist();
+    const registry = state.registry;
+    return (name) => {
+      if (allowlist && !allowlist.has(name)) return false;
+      const captured = capturedTools.get(name) !== undefined;
+      if (PI_CORE_TOOL_NAME_SET.has(name)) {
+        if (!registry.has("pi")) return false;
+        if (options.managedHost) return captured;
+        return name !== "powershell" || captured || registered.has(name);
+      }
+      return captured && registry.has("extensions");
+    };
+  };
+  const unsubscribeToolPlacement = pi.events.on(
+    FABRIC_TOOL_PLACEMENT_EVENT,
+    (value: unknown) => {
+      const request = readFabricToolPlacementRequestV1(value);
+      if (!request) throw new Error("Invalid Pi Fabric tool placement query");
+      const config = state.bootstrapped ? state.config : DEFAULT_FABRIC_CONFIG;
+      const mode: FabricToolPlacementMode = config.schema.mode === "enforce"
+        ? "enforce"
+        : config.fullCodeMode ? "full-code" : "orchestration";
+      const registered = pi.getAllTools().map((tool) => tool.name);
+      request.reply(fabricToolPlacement({
+        mode,
+        registered,
+        active: pi.getActiveTools(),
+        program: programReachable(new Set(registered)),
+        ...(request.tools ? { tools: request.tools } : {}),
+      }));
     },
   );
 
@@ -961,6 +1018,8 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
     entropyCompilePending = undefined;
     unsubscribeComponentRegistration();
     unsubscribeProviderRegistration();
+    unsubscribeProviderWithdrawal();
+    unsubscribeToolPlacement();
     pendingHandoffs.clear();
     directToolApproval.clear();
     toolDisplay.clear();

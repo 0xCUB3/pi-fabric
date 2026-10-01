@@ -5,6 +5,7 @@ export type { FabricJevConfig } from "./jev/config.js";
 import os from "node:os";
 import path from "node:path";
 import { renameAtomic } from "./core/atomic-write.js";
+import { approvalActionOverridesValue, type FabricActionApprovalMode } from "./core/approval-overrides.js";
 import { quarantineDamagedFile } from "./core/damaged-file.js";
 import { normalizeModelAliases, type FabricModelAliases } from "./core/model-resolution.js";
 import { PI_CORE_TOOL_NAME_SET } from "./core/pi-tools.js";
@@ -86,6 +87,8 @@ export interface FabricApprovalConfig {
   network: FabricApprovalMode;
   agent: FabricApprovalMode;
   model?: string;
+  /** Exact `provider.action` or `provider.*` → allow | ask | deny; exact beats wildcard beats risk mode. */
+  actions?: Record<string, FabricActionApprovalMode>;
 }
 
 /** Session-start background revalidation scope for the MCP descriptor cache:
@@ -814,6 +817,7 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
       )
     : DEFAULT_FABRIC_CONFIG.agents.defaultTools;
   const approvalModel = normalizeJevApprovalModel(stringValue(approvals.model));
+  const approvalActions = approvalActionOverridesValue(approvals.actions);
   const configPath = stringValue(mcp.configPath);
   const meshRoot = stringValue(mesh.root);
   const memoryIndexDir = stringValue(memory.indexDir);
@@ -975,6 +979,7 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
       network: approvalMode(approvals.network, DEFAULT_FABRIC_CONFIG.approvals.network),
       agent: approvalMode(approvals.agent, DEFAULT_FABRIC_CONFIG.approvals.agent),
       ...(approvalModel ? { model: approvalModel } : {}),
+      ...(approvalActions ? { actions: approvalActions } : {}),
     },
     mcp: {
       enabled: booleanValue(mcp.enabled, DEFAULT_FABRIC_CONFIG.mcp.enabled),
@@ -1605,6 +1610,7 @@ export const saveFabricConfig = (
   // Reject invalid ownership before the settings UI replaces a working file.
   // Do not normalize the whole document: saved layers must remain sparse.
   nativeMcpServersValue(objectValue(merged.mcp).nativeServers);
+  approvalActionOverridesValue(objectValue(merged.approvals).actions);
   // Never stamp down: preserve version markers written by newer builds.
   merged.configVersion = Math.max(
     typeof merged.configVersion === "number" ? merged.configVersion : 0,

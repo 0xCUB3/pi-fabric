@@ -7,12 +7,41 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { readFabricExecutionTraceV1 } from "../audit/index.js";
 import { FABRIC_NESTED_TOOL_CALL_ID_PREFIX as NESTED_TOOL_CALL_ID_PREFIX } from "../protocol.js";
+import type {
+  FabricToolPlacement,
+  FabricToolPlacementMode,
+  FabricToolPlacementResultV1,
+} from "../protocol.js";
 import type { ToolLoadout, ToolLoadoutChanges } from "@earendil-works/pi-coding-agent";
 
 // Hide every registered declaration, including historical transcript declarations.
 // Keep tools active: Pi 0.99 uses that set for native nested-call availability.
 export const fabricToolLoadout = (loadout: ToolLoadout, exclusive: boolean): ToolLoadoutChanges | undefined =>
   exclusive ? { hiddenDeclarations: loadout.registered.map((tool) => tool.name).filter((name) => name !== "fabric_exec") } : undefined;
+
+/**
+ * Answer pi-fabric:tool-placement:v1. `model` mirrors fabricToolLoadout: an
+ * exclusive mode declares only fabric_exec; orchestration declares the active
+ * set. `program` is the caller's view of pi.* / extensions.* reachability.
+ */
+export const fabricToolPlacement = (input: {
+  mode: FabricToolPlacementMode;
+  registered: readonly string[];
+  active: readonly string[];
+  program: (name: string) => boolean;
+  tools?: readonly string[];
+}): FabricToolPlacementResultV1 => {
+  const active = new Set(input.active);
+  const exclusive = input.mode !== "orchestration";
+  const tools: Record<string, FabricToolPlacement> = {};
+  for (const name of input.tools ?? input.registered) {
+    if (Object.hasOwn(tools, name)) continue;
+    tools[name] = active.has(name) && (!exclusive || name === FABRIC_TOOL_NAME)
+      ? "model"
+      : input.program(name) ? "program" : "unavailable";
+  }
+  return { version: 1, mode: input.mode, tools };
+};
 
 // setActiveTools can run during a captured call or in a later extension handler,
 // removing this tool (and thus its loadout hook). Reassert at the native request

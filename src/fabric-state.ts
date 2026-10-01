@@ -296,6 +296,17 @@ export class FabricState {
     this.#current()?.registerExternal(provider, options);
   }
 
+  /** False when the name is unknown, managed, or the generation pin does not match. */
+  withdrawExternal(name: string, generation?: number | string): boolean {
+    if (this.#managedHost || !this.#externalProviders.has(name)) return false;
+    // A generation pin needs a live binding to match; an unpinned withdrawal
+    // also forgets registrations no runtime has mounted yet.
+    const withdrawn = this.#current()?.withdrawExternal(name, generation) ?? false;
+    if (!withdrawn && generation !== undefined) return false;
+    this.#externalProviders.delete(name);
+    return true;
+  }
+
   registerExternalComponent(
     component: FabricComponentDefinition,
     options: { overwrite?: boolean } = {},

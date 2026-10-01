@@ -23,6 +23,7 @@ const selectListThemeFor = (theme: unknown) => {
   };
 };
 import type { FabricApprovalConfig } from "../config.js";
+import { actionApprovalOverride } from "./approval-overrides.js";
 import type { FabricRisk } from "../protocol.js";
 import type { ResolvedFabricAction } from "./action-registry.js";
 import {
@@ -96,9 +97,15 @@ export class ApprovalController {
     action: ResolvedFabricAction,
     args: Record<string, unknown> = {},
   ): Promise<void> {
+    const override = actionApprovalOverride(this.config.actions, action.ref);
+    // An action-level deny is absolute: no inherited or session risk grant lifts it.
+    if (override === "deny") {
+      throw new FabricTraceSafeError(`${action.ref} is denied by the Fabric approvals.actions policy`);
+    }
     // This is an immutable host capability, not a model/configurable network grant.
     if (action.risk === "network" && this.brokeredNetwork?.(action.provider) === true) return;
-    const mode = this.config[action.risk];
+    // Exact ref beats provider wildcard beats the risk-class mode.
+    const mode = override ?? this.config[action.risk];
     if (
       mode === "allow" ||
       (!this.brokeredNetwork && (

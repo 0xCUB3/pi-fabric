@@ -69,6 +69,7 @@ import {
 } from "./entropy/active.js";
 import { RuntimeStateSpeculation } from "./runtime-state-speculation.js";
 import { schemaRefAllowedInEnforce } from "./schema/policy.js";
+import { actionApprovalOverride } from "./core/approval-overrides.js";
 import type { FabricSpeculationStreamTap } from "./speculation/stream-tap.js";
 import { MeshStore, type MeshIdentity } from "./mesh/store.js";
 import { LifecycleBroker } from "./lifecycle/broker.js";
@@ -1063,7 +1064,9 @@ export class FabricRuntimeState {
       () => this.#sessionCapabilityLease?.view,
       (ref) => {
         const current = this.#config!;
-        if (current.approvals[ref.startsWith("mcp.") ? "network" : "read"] !== "allow") return false;
+        const mode = actionApprovalOverride(current.approvals.actions, ref) ??
+          current.approvals[ref.startsWith("mcp.") ? "network" : "read"];
+        if (mode !== "allow") return false;
         if (ref.startsWith("pi.") && !current.fullCodeMode && current.schema.mode !== "enforce") return false;
         return current.schema.mode !== "enforce" || schemaRefAllowedInEnforce(ref);
       },
@@ -1307,6 +1310,23 @@ export class FabricRuntimeState {
     }
     this.#externalProviders.set(provider.name, provider);
     if (this.#registry) this.#registry.register(provider, options);
+  }
+
+  /** Withdraw a direct registration through the same retire/release path a
+   * component lease uses. The host owns the instance, so it is not closed. */
+  withdrawExternal(name: string, generation?: number | string): boolean {
+    if (this.#managedHost) return false;
+    const provider = this.#externalProviders.get(name);
+    if (!provider) return false;
+    const registry = this.#registry;
+    const withdrawn = registry?.unregister(name, {
+      provider,
+      ...(generation !== undefined ? { generation } : {}),
+      keepProviderOpen: true,
+    });
+    if (!withdrawn && generation !== undefined) return false;
+    this.#externalProviders.delete(name);
+    return true;
   }
 
   registerExternalComponent(

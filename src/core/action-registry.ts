@@ -377,8 +377,11 @@ export class ActionRegistry {
       .sort((left, right) => left.name.localeCompare(right.name));
   }
 
-  unregister(name: string): FabricProvider | undefined {
-    return this.#providerBindings.unregister(name);
+  unregister(
+    name: string,
+    options?: { provider?: FabricProvider; generation?: number | string; keepProviderOpen?: boolean },
+  ): FabricProvider | undefined {
+    return this.#providerBindings.unregister(name, options);
   }
 
   providers(context?: FabricInvocationContext): Array<{ name: string; description: string }> {

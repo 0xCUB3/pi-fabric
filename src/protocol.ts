@@ -32,6 +32,81 @@ export interface FabricShellTimingV1 {
 
 export const FABRIC_PROVIDER_REGISTER_EVENT = "pi-fabric:provider:register:v1";
 export const FABRIC_PROVIDER_DISCOVER_EVENT = "pi-fabric:provider:discover:v1";
+export const FABRIC_PROVIDER_WITHDRAW_EVENT = "pi-fabric:provider:withdraw:v1";
+
+/**
+ * Withdraws a directly registered provider. `generation` pins the withdrawal
+ * to one binding: a number matches the binding generation, a string matches
+ * the provider binding id. A mismatch or unknown name is ignored.
+ */
+export interface FabricProviderWithdrawalV1 {
+  name: string;
+  generation?: number | string;
+}
+
+export const readFabricProviderWithdrawalV1 = (
+  value: unknown,
+): FabricProviderWithdrawalV1 | undefined => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const generation = record.generation;
+  if (
+    typeof record.name !== "string" ||
+    record.name.length === 0 ||
+    record.name.length > 128 ||
+    (generation !== undefined &&
+      !(typeof generation === "number" && Number.isSafeInteger(generation) && generation > 0) &&
+      !(typeof generation === "string" && generation.length > 0 && generation.length <= 128))
+  ) {
+    return undefined;
+  }
+  return {
+    name: record.name,
+    ...(generation !== undefined ? { generation: generation as number | string } : {}),
+  };
+};
+
+export const FABRIC_TOOL_PLACEMENT_EVENT = "pi-fabric:tool-placement:v1";
+export const MAX_FABRIC_TOOL_PLACEMENT_QUERY = 1_024;
+
+/**
+ * model = declared to the model this turn; program = callable from
+ * fabric_exec (pi.* / extensions.*); unavailable otherwise. model wins when
+ * both apply.
+ */
+export type FabricToolPlacement = "model" | "program" | "unavailable";
+export type FabricToolPlacementMode = "full-code" | "enforce" | "orchestration";
+
+export interface FabricToolPlacementResultV1 {
+  version: 1;
+  mode: FabricToolPlacementMode;
+  tools: Record<string, FabricToolPlacement>;
+}
+
+/** Host-local synchronous query; omitted `tools` reports every registered tool. */
+export interface FabricToolPlacementRequestV1 {
+  tools?: string[];
+  reply: (result: FabricToolPlacementResultV1) => void;
+}
+
+export const readFabricToolPlacementRequestV1 = (
+  value: unknown,
+): FabricToolPlacementRequestV1 | undefined => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const tools = record.tools;
+  if (
+    typeof record.reply !== "function" ||
+    (tools !== undefined && (
+      !Array.isArray(tools) ||
+      tools.length > MAX_FABRIC_TOOL_PLACEMENT_QUERY ||
+      tools.some((name) => typeof name !== "string" || name.length === 0 || name.length > 256)
+    ))
+  ) {
+    return undefined;
+  }
+  return value as FabricToolPlacementRequestV1;
+};
 export const FABRIC_COMPONENT_REGISTER_EVENT = "pi-fabric:component:register:v1";
 export const FABRIC_COMPONENT_DISCOVER_EVENT = "pi-fabric:component:discover:v1";
 export const FABRIC_PREWALK_REQUEST_EVENT = "pi-fabric:prewalk:request:v1";

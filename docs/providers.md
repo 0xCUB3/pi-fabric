@@ -51,6 +51,48 @@ async invoke(actionName, args, context) {
 }
 ```
 
+## Withdrawing a direct registration
+
+An extension withdraws a provider it registered directly by emitting `FABRIC_PROVIDER_WITHDRAW_EVENT` (`pi-fabric:provider:withdraw:v1`):
+
+```ts
+import { FABRIC_PROVIDER_WITHDRAW_EVENT, type FabricProviderWithdrawalV1 } from "pi-fabric/protocol";
+
+pi.events.emit(FABRIC_PROVIDER_WITHDRAW_EVENT, { name: "example" } satisfies FabricProviderWithdrawalV1);
+```
+
+Fabric retires the current binding and drops its owner hold, the same path a component lease takes. New calls to `example.*` are refused immediately. Work already admitted and committed capability views that pinned the old generation drain under the [retained-generation rules](provider-capabilities.md#capability-views). The extension owns the provider instance, so Fabric does not call `close()` on withdrawal. Fabric also forgets the registration and does not remount it on reload; an extension that answers `FABRIC_PROVIDER_DISCOVER_EVENT` must stop registering there too. Register again with `FABRIC_PROVIDER_REGISTER_EVENT` at any time.
+
+Optional `generation` pins the withdrawal to one binding: a number matches the binding generation, a string matches the provider binding id (`providerBindingId` in a committed view). Unknown names, generation mismatches, component-owned providers, and managed-host providers are ignored; set `PI_FABRIC_DEBUG=1` to log ignored withdrawals. Component-owned providers withdraw through their component lifecycle.
+
+## Tool placement query
+
+Extensions that need to know where a tool is reachable this turn can ask synchronously with `FABRIC_TOOL_PLACEMENT_EVENT` (`pi-fabric:tool-placement:v1`), so they need not guess from Fabric's mode:
+
+```ts
+import {
+  FABRIC_TOOL_PLACEMENT_EVENT,
+  type FabricToolPlacementRequestV1,
+  type FabricToolPlacementResultV1,
+} from "pi-fabric/protocol";
+
+let placement: FabricToolPlacementResultV1 | undefined;
+pi.events.emit(FABRIC_TOOL_PLACEMENT_EVENT, {
+  tools: ["my_tool", "read"],
+  reply: (result) => { placement = result; },
+} satisfies FabricToolPlacementRequestV1);
+// placement === undefined: Fabric is not loaded.
+// placement.tools.my_tool: "model" | "program" | "unavailable"
+```
+
+The reply is `{ version: 1, mode, tools }`. `mode` is `"full-code"`, `"enforce"` (Schema enforce), or `"orchestration"`. Each tool maps to:
+
+- `model`: declared to the model this turn. Exclusive modes declare only `fabric_exec`; orchestration declares Pi's active set.
+- `program`: callable from a `fabric_exec` program, as `pi.<tool>` for Pi core tools or `extensions.<tool>` for captured extension tools. Requires an initialized Fabric runtime and respects child tool allowlists. Schema enforce exposes no `extensions.*` namespace.
+- `unavailable`: neither.
+
+`model` wins when both apply. Omitting `tools` reports every tool registered with Pi; at most 1,024 names of up to 256 characters each are accepted. An invalid query gets no reply. Placement describes state at the time of the query. A later mode change, reload, or tool refresh can change it, so query when you need the answer and do not cache it.
+
 ## Invocation costs and guarantees
 
 | Access pattern | Work and allocation | Guarantees |
