@@ -76,13 +76,15 @@ Pi's native MCP can optionally supply selected servers beneath the same Fabric A
 
 ## Install
 
-Requires Node.js 24+ and Pi 0.99.0+. Monty's optional native package installs on supported platforms; only the explicit CPython escape hatch requires CPython 3.10+. Fabric warns when a detectable host is older than the required native loadout and nested-execution contracts.
+Requires Node.js 24+ and Pi 1.0.0+. Monty's optional native package installs on supported platforms; only the explicit CPython escape hatch requires CPython 3.10+. Fabric warns when a detectable host is older than the required native loadout and nested-execution contracts.
+
+**0.103.1: Pi 1.0 compatibility.** Full-code and Schema enforce loadouts own declarations through native `prepareLoadout`, including built-in codemode, tool search, MCP, late activation, and reload. Captured dispatch and core overrides retain native middleware; capture patches restore on the final shutdown lease without recursive wrapping. Run `bun run test:pi1` for public-contract, compiled SDK, and bundled-CLI regressions. Optional/audit mode retains the host loadout.
 
 **0.103.0: daemon primitives.** Headless, restart-safe sessions get small composable building blocks: a [runner contract](docs/agents.md#custom-runners) with hosted runs that persist a locator before start and never relaunch (`pi-fabric/runners`); durable [decisions](docs/decisions.md) with escalation chains, headless approvals, and routed child dialogs; mesh timers, scoped external grants, and the `pi-fabric` CLI; [saved programs](docs/programs.md) with host-invoked runs; host-issued principal and scope (`pi-fabric/scope`) that children only narrow; write confinement, context-inheriting spawn, and worktree results; provider participants, a foreground-tool policy, compaction pressure and carry-forward focus, [thinking control](docs/thinking.md), heartbeat liveness across PID namespaces, and incarnation-fenced control commands. New behavior is opt-in or additive. A configured `agents.runner` id that no extension registers is kept and warned about once per session, without falling back to `pi`.
 
 **0.102.0: opt-in Pi-owned MCP.** Select native servers with `mcp.nativeServers` while keeping Fabric's API, policy pipeline, names/descriptions, and result normalization. Existing defaults remain unchanged. Native identities are indexed by registration snapshot, with live exposure and schema checks; SDK reload and settings-save guards are included.
 
-**0.101.1: Pi 0.99 compatibility.** Full-code and Schema enforce modes declare only `fabric_exec`, including with native codemode, tool search, MCP, late registrations, and active-tool changes. Captured tools remain available as `extensions.<name>(...)` inside Fabric, with host middleware applied. Pi packages and TypeBox are host-supplied peers, never bundled. Run `bun run test:pi99` for the offline compiled-extension SDK and bundled-CLI regression. The same compiled package also passes an isolated Pi 0.99.1 SDK/CLI gate; development pins remain 0.99.0.
+**0.101.1: Pi 0.99 compatibility.** Full-code and Schema enforce modes declare only `fabric_exec`, including with native codemode, tool search, MCP, late registrations, and active-tool changes. Captured tools remain available as `extensions.<name>(...)` inside Fabric, with host middleware applied. Pi packages and TypeBox are host-supplied peers, never bundled. The same compiled package also passes an isolated Pi 0.99.1 SDK/CLI gate; development pins at that release were 0.99.0.
 
 ```bash
 pi install npm:pi-fabric

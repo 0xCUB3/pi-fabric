@@ -5,7 +5,7 @@ for await (const line of lines) {
   if (request.id === undefined) continue;
   let result;
   switch (request.method) {
-    case "initialize": result = { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "pi99-fixture", version: "1" } }; break;
+    case "initialize": result = { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "pi1-fixture", version: "1" } }; break;
     case "tools/list": result = { tools: [{ name: "echo", description: "Offline echo", inputSchema: { type: "object", properties: { value: { type: "string" } }, required: ["value"] } }] }; break;
     case "tools/call": result = { content: [{ type: "text", text: `mcp:${request.params.arguments.value}` }], structuredContent: { value: request.params.arguments.value } }; break;
     case "ping": result = {}; break;

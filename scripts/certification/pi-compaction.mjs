@@ -12,7 +12,7 @@ const internalCompactionUrl = pathToFileURL(
 ).href;
 const internalCompaction = await import(internalCompactionUrl);
 
-const CERTIFIED_PI_VERSION = "0.99.0";
+const CERTIFIED_PI_VERSION = "1.0.0";
 
 if (piPackage.version !== CERTIFIED_PI_VERSION) {
   throw new Error(
