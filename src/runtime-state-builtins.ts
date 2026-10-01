@@ -200,7 +200,7 @@ export class RuntimeStateBuiltins {
       ...(config.mesh.enabled && !this.managedHost ? ["decisions"] : []),
       "schema",
       "compact",
-      ...(!this.managedHost ? ["cache", "thinking"] : []),
+      ...(!this.managedHost ? ["cache", "thinking", "programs"] : []),
       "prewalk",
       "agents",
       ...(!this.managedHost && config.jev.enabled && config.schema.mode !== "enforce" ? ["jev"] : []),

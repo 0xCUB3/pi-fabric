@@ -97,6 +97,7 @@ import { getActiveRepairCompiler } from "./repairs/active.js";
 import { piHostCompatibilityWarning } from "./host-compatibility.js";
 import {
   FABRIC_COMPONENT_REGISTER_EVENT,
+  FABRIC_PROGRAM_RUN_EVENT,
   FABRIC_PROVIDER_REGISTER_EVENT,
   FABRIC_PROVIDER_WITHDRAW_EVENT,
   FABRIC_TOOL_PLACEMENT_EVENT,
@@ -330,6 +331,17 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
       }));
     },
   );
+
+  // Host program runs (daemons, embedders) use the live session's context.
+  let programRunContext: ExtensionContext | undefined;
+  const unsubscribeProgramRun = pi.events.on(FABRIC_PROGRAM_RUN_EVENT, (value: unknown) => {
+    const reply = (value as { reply?: unknown } | null)?.reply;
+    if (typeof reply !== "function") throw new Error("Invalid Pi Fabric program run request");
+    void import("./programs/host.js").then(
+      ({ handleFabricProgramRunEvent }) => handleFabricProgramRunEvent(value, { state, pi, context: programRunContext }),
+      (error: unknown) => reply({ ok: false, error: `Fabric program host unavailable: ${String(error)}` }),
+    );
+  });
 
   pi.on("resources_discover", async (_event, context) => {
     if (!state.bootstrapped) await state.bootstrap(context);
@@ -642,6 +654,7 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
       }
     }
     state.thinking.invalidate();
+    programRunContext = context;
     await state.bootstrap(context);
     // A Fabric child narrows its level into the parent's inherited bounds.
     if (process.env[FABRIC_THINKING_BOUNDS_ENV] !== undefined && state.bootstrapped) {
@@ -1100,6 +1113,8 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
     unsubscribeProviderRegistration();
     unsubscribeProviderWithdrawal();
     unsubscribeToolPlacement();
+    unsubscribeProgramRun();
+    programRunContext = undefined;
     pendingHandoffs.clear();
     directToolApproval.clear();
     toolDisplay.clear();

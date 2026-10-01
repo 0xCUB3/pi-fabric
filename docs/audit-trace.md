@@ -102,6 +102,10 @@ Guest span IDs are deterministic execution-local bridge correlation values. Fabr
 
 When a program is cancelled or times out, Fabric stops the [provider participants](providers.md#provider-participants) it owns and records one `fabric.participant.stop` operation per participant after the program's own operations. Arguments keep the identifier-shaped `ref` and `reason` (`program_cancelled`). The result keeps `outcome` (`confirmed` or `unconfirmed`) and, for an unconfirmed stop, `detail` (`declined`, `error`, or `timeout`). A confirmed stop succeeds and an unconfirmed one fails at the `invoke` stage.
 
+### Saved program runs
+
+Each [saved program](programs.md) that `programs.run` executes records one `fabric.program.run` operation right after the `programs.run` call, in the same sequence space. Its arguments hold `program` (`name@<full digest>`) and, for runs started by `/fabric run` or the program run event, `invokedBy: "host"`. The nested program's own operations follow it in the caller's trace. A type error fails the operation at stage `prepare`; a failed, aborted, or timed-out program fails it with that outcome.
+
 Traces retain only plain local paths. They drop URL paths, together with credentials and query/fragment data. Plain paths lose their query/fragment suffixes as well. Sensitive-key normalization, media/base64 rejection, JSON safety, depth/node limits, and UTF-8 truncation still run after projection and add defense in depth. Projection provides the primary secrecy mechanism.
 
 Identifiers (`ref`, `provider`, `action`), outcomes, failure stage, operation sequence, and occurrence-ordered phase labels stay durable. These fields, the retained local paths and mesh addresses, and bash command text are not secret containers. Callers must never place credentials in identifiers, local filenames, topics, keys, phase names, or commands.

@@ -135,6 +135,7 @@ describe("Fabric runtime provider components", () => {
           "fabric.provider.mesh",
           "fabric.provider.pi",
           "fabric.provider.prewalk",
+          "fabric.provider.programs",
           "fabric.provider.schema",
           // Interactive sessions need jev-fabric, which is not offered on Windows.
           ...(process.platform === "win32" ? [] : ["fabric.provider.sessions"]),
@@ -167,6 +168,7 @@ describe("Fabric runtime provider components", () => {
             "cache",
             "thinking",
             "prewalk",
+            "programs",
             "agents",
             "memory",
             "jev",

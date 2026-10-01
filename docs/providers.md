@@ -158,6 +158,24 @@ pi.events.on(FABRIC_WORKFLOW_ITEM_EVENT, (event: FabricWorkflowItemEventV1) => {
 
 `invocationId` is the owning `fabric_exec` tool call id. `itemId` is the caller's stable id or the deterministic per-invocation `item-<n>`. `from` is absent on an item's first status, and `meta` appears only when the transitioning call carried it. Updates that keep the same status emit nothing. When the program ends, items still `running` settle to `completed` or `failed` and emit that transition, matching the activity surface. Fabric emits synchronously from the host bridge and never waits on listeners. A throwing listener is logged and cannot fail the program. Transitions stay in the execution trace as before; `meta` never enters it.
 
+## Program run events
+
+A host extension, daemon bridge, or embedder runs a [saved program](programs.md#host-runs) without a model turn by emitting `pi-fabric:program:run:v1` (`FABRIC_PROGRAM_RUN_EVENT`):
+
+```ts
+import { FABRIC_PROGRAM_RUN_EVENT, type FabricProgramRunReplyV1 } from "pi-fabric/protocol";
+
+pi.events.emit(FABRIC_PROGRAM_RUN_EVENT, {
+  ref: "changed-tests",            // name, name@<digest prefix>, or digest
+  input: { base: "main" },         // optional, JSON, at most 64 KiB
+  requirePromoted: true,           // optional
+  signal,                          // optional AbortSignal
+  reply: (result: FabricProgramRunReplyV1) => {},
+});
+```
+
+The run has the same semantics as `/fabric run`: the session's root capability view, the configured approval policy, a `pi-fabric-program-run` transcript message, and `invokedBy: "host"` in the trace. `reply` is called exactly once with `{ ok: true, program, value, logs }` or `{ ok: false, error, program? }`.
+
 ## Managed embedded hosts
 
 Trusted embedding code can opt into a closed-world provider authority:

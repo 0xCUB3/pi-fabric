@@ -438,6 +438,7 @@ globalThis.compact = __providerProxy("compact");
 globalThis.cache = __providerProxy("cache");
 globalThis.thinking = __providerProxy("thinking");
 globalThis.decisions = __providerProxy("decisions");
+globalThis.programs = __providerProxy("programs");
 globalThis.prewalk = __providerProxy("prewalk");
 globalThis.jev = __providerProxy("jev");
 const __createActor = async (args = {}) => {

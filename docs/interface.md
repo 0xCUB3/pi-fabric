@@ -204,9 +204,13 @@ async invoke(actionName, args, context) {
 /fabric repairs
 /fabric entropy
 /fabric decisions [id]
+/fabric programs [promote <ref>|retire <ref>]
+/fabric run <ref> [json input]
 ```
 
 `/fabric decisions` lists open [durable decisions](decisions.md) and answers the picked one through native dialogs.
+
+`/fabric programs` lists [saved programs](programs.md) with their status; `promote` and `retire` are the only way to change one. `/fabric run` executes a saved program without the model, with the same approval policy as a model call, and shows the result in the transcript.
 
 Actor slash commands mirror the [global template API](agents.md#global-actor-templates). `/fabric global` lists templates. `/fabric import <name> [as <new>]` stamps one into the project. `/fabric export <id> [--overwrite]` promotes a project actor. `/fabric log <id>` previews an actor or run transcript, and `/fabric export-log <id> [path]` writes the raw `session.jsonl` plus retained `runs/` to disk.
 

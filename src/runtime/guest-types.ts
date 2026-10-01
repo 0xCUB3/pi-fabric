@@ -1434,6 +1434,25 @@ interface FabricDecisionsApi {
   cancel(args: { id: string }): Promise<FabricDecision>;
 }
 
+type FabricProgramStatus = "candidate" | "promoted" | "retired";
+interface FabricProgramSummary {
+  /** name@digest12 */
+  ref: string; name: string; digest: string; kind: "fabric" | "jev"; kernel?: "typescript" | "python";
+  description?: string; createdAt: number; status: FabricProgramStatus;
+}
+interface FabricProgramRecord extends FabricProgramSummary {
+  version: 1; code?: string; jevProgram?: Record<string, unknown>; inputSchema?: Record<string, unknown>; trial?: unknown;
+}
+interface FabricProgramsApi {
+  /** Always saved as a candidate; identical content returns the same ref. */
+  save(args: { name: string; kind?: "fabric" | "jev"; kernel?: "typescript" | "python"; code?: string; jevProgram?: Record<string, unknown>; description?: string; inputSchema?: Record<string, unknown> }): Promise<{ ref: string; digest: string }>;
+  list(args?: { name?: string; status?: FabricProgramStatus }): Promise<FabricProgramSummary[]>;
+  /** ref: name (latest promoted, else latest candidate), name@<digest prefix >= 12>, or a full digest. */
+  get(args: { ref: string }): Promise<FabricProgramRecord>;
+  /** Runs nested with this program's capabilities; args.input becomes the saved program's input global. */
+  run<T = unknown>(args: { ref: string; input?: unknown; requirePromoted?: boolean }): Promise<T>;
+}
+
 interface FabricCompactApi {
   request(args?: {
     reason?: string;
@@ -1554,6 +1573,7 @@ declare const compact: FabricCompactApi;
 declare const cache: FabricCacheApi;
 declare const thinking: FabricThinkingApi;
 declare const decisions: FabricDecisionsApi;
+declare const programs: FabricProgramsApi;
 declare const prewalk: FabricPrewalkApi;
 ${JEV_GUEST_DECLARATIONS}
 declare const council: FabricCouncilApi;

@@ -220,6 +220,11 @@ export const projectFabricAuditArgs = (
       });
     case "fabric.workflow.event":
       return projected(args, (output) => copyIdentifier(output, args, "level"));
+    case "fabric.program.run":
+      return projected(args, (output) => {
+        copyString(output, args, "program");
+        copyIdentifier(output, args, "invokedBy");
+      });
     case "fabric.workflow.parallel":
     case "fabric.workflow.pipeline":
       return projected(args, (output) => {

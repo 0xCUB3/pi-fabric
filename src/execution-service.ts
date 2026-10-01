@@ -53,13 +53,14 @@ import {
   codeUsesOrchestration,
   isBlockingOrchestrationRef,
 } from "./runtime/orchestration.js";
-import type { FabricCommittedCapabilityView, FabricMediaBlock } from "./protocol.js";
+import type { FabricCommittedCapabilityView, FabricGuestTypeSources, FabricMediaBlock } from "./protocol.js";
 import {
   sanitizeFabricMediaText,
   sanitizeFabricMediaValue,
 } from "./core/media-sanitize.js";
 import { fabricExecTitleHintCached } from "./ui/fabric-title-hint.js";
 import type {
+  FabricHostCall,
   FabricKernel,
   FabricKernelRuntime,
   FabricSandboxResult,
@@ -158,6 +159,29 @@ export type FabricHeadlessApproval = (
   signal: AbortSignal | undefined,
 ) => Promise<boolean>;
 
+/** One saved program run nested inside an active execution (`programs.run`). */
+export interface FabricNestedProgramRun {
+  /** `name@digest`, recorded on the `fabric.program.run` trace operation. */
+  program: string;
+  /** Guest source in the execution's kernel language. */
+  code?: string;
+  /** A single host action, used for Jev programs (`jev.run`). */
+  call?: { ref: string; args: Record<string, unknown> };
+}
+
+/**
+ * Runs a program through the enclosing execution's own host bridge: the same
+ * capability view, approval controller, agent budget, signal and trace. It
+ * can never widen what the calling program may do.
+ */
+export interface FabricNestedProgramRunner {
+  kernel: FabricKernel;
+  run(request: FabricNestedProgramRun, signal: AbortSignal | undefined): Promise<unknown>;
+}
+
+/** Bounds recursive `programs.run` chains within one outer execution. */
+export const MAX_NESTED_PROGRAM_RUNS = 16;
+
 export interface FabricExecutionAuthorizer {
   authorize(ref: string, parentToolCallId: string): Promise<void>;
 }
@@ -175,6 +199,8 @@ export interface FabricExecutionOptions {
   tokenBudget?: number;
   maxAgentCalls?: number;
   display?: FabricRunDisplay;
+  /** Host-invoked program runs (`/fabric run`, the program run event). */
+  invokedBy?: "host";
   onPartial(snapshot: FabricExecutionPartial): void;
 }
 
@@ -185,6 +211,7 @@ export class FabricExecutionService {
   #emitEvent: ((channel: string, data: unknown) => void) | undefined;
   #headlessApproval: FabricHeadlessApproval | undefined;
   #participants: ProviderParticipantRegistry | undefined;
+  readonly #nestedRunners = new Map<string, FabricNestedProgramRunner>();
   constructor(
     readonly registry: ActionRegistry,
     readonly config: FabricConfig,
@@ -208,6 +235,11 @@ export class FabricExecutionService {
   /** Session registry behind `context.participants` and owned-work cancellation. */
   setParticipantRegistry(registry: ProviderParticipantRegistry | undefined): void {
     this.#participants = registry;
+  }
+
+  /** The nested program runner of the active execution with this outer call id. */
+  nestedProgramRunner(parentToolCallId: string): FabricNestedProgramRunner | undefined {
+    return this.#nestedRunners.get(parentToolCallId);
   }
 
   /** No-UI approval fallback used when approvals.headless is "decision". */
@@ -277,6 +309,7 @@ export class FabricExecutionService {
     }
     let code = options.code;
     let checked: FabricTypeCheckResult = { errors: [] };
+    let guestTypeSources: FabricGuestTypeSources = {};
     const unavailable = new Map(
       this.registry.unavailableProviders().map((entry) => [entry.name, entry.reason]),
     );
@@ -289,7 +322,7 @@ export class FabricExecutionService {
     if (!python) {
       // TypeScript alone consumes live schemas as compiler declarations. Python
       // compiles in CPython; both kernels share authoritative registry validation.
-      const guestTypeSources = await this.registry.guestTypeSources({
+      guestTypeSources = await this.registry.guestTypeSources({
         cwd: options.context.cwd,
         signal: options.signal,
         parentToolCallId: options.parentToolCallId,
@@ -622,10 +655,110 @@ export class FabricExecutionService {
       });
     };
     let sandboxResult: FabricSandboxResult;
+    let hostCall: FabricHostCall | undefined;
+    const sandboxBase = {
+      cwd: options.context.cwd,
+      memoryLimitBytes: this.config.executor.memoryLimitBytes,
+      maxLogChars: this.config.executor.maxOutputChars,
+      minimumTimeoutMsForHostCall,
+      ...(!python ? { piToolCanonicalFields } : {}),
+      ...(options.tokenBudget !== undefined ? { tokenBudget: options.tokenBudget } : {}),
+    };
+    // Saved programs (`programs.run`) execute through this same bridge, so a
+    // nested program shares the caller's view, approvals, budgets and trace.
+    const nestedLogs: string[] = [];
+    let nestedLogChars = 0;
+    let nestedRuns = 0;
+    // Same source, same declarations: a repeated program type-checks once.
+    const preparedPrograms = new Map<string, { code: string; checked: FabricTypeCheckResult }>();
+    const runNestedProgram = async (
+      request: FabricNestedProgramRun,
+      signal: AbortSignal | undefined,
+    ): Promise<unknown> => {
+      const bridge = hostCall;
+      if (!bridge) throw new Error("Fabric program runs need an active execution");
+      nestedRuns++;
+      if (nestedRuns > MAX_NESTED_PROGRAM_RUNS) {
+        throw new FabricTraceSafeError(`Fabric nested program budget exhausted (${MAX_NESTED_PROGRAM_RUNS} per execution)`);
+      }
+      const operation = traceRecorder.issueCall("fabric.program.run", {
+        program: request.program,
+        ...(options.invokedBy ? { invokedBy: options.invokedBy } : {}),
+      });
+      const runSignal = signal ?? new AbortController().signal;
+      let stage: FabricExecutionFailureStageV1 = "invoke";
+      try {
+        if (request.call) {
+          const value = await bridge(request.call.ref, request.call.args, runSignal);
+          operation.succeed(undefined);
+          return value;
+        }
+        let source = request.code ?? "";
+        let prepared: FabricTypeCheckResult = { errors: [] };
+        if (!python) {
+          stage = "prepare";
+          const cached = preparedPrograms.get(source);
+          const next = cached ?? (runtime as TypeScriptKernelRuntime).prepare(
+            source,
+            effectiveFullCodeMode,
+            [...unavailable.keys()],
+            guestTypeSources,
+            coreOverrides,
+          );
+          if (!cached) preparedPrograms.set(source, next);
+          ({ code: source, checked: prepared } = next);
+          if (prepared.errors.length > 0) {
+            throw new Error(`Program ${request.program} has type errors: ${prepared.errors
+              .slice(0, 5)
+              .map((error) => error.line > 0 ? `line ${error.line}:${error.column} ${error.message}` : error.message)
+              .join("; ")}`);
+          }
+          stage = "invoke";
+        }
+        // Guest span ids restart in each program; keep them distinct per run.
+        const spanPrefix = `program-${nestedRuns}:`;
+        const nestedBridge: FabricHostCall = (ref, args, callSignal) =>
+          (ref === "fabric.$spanStart" || ref === "fabric.$spanEnd") && typeof args.id === "string"
+            ? bridge(ref, { ...args, id: `${spanPrefix}${args.id}` }, callSignal)
+            : bridge(ref, args, callSignal);
+        const result = await runtime.execute(source, nestedBridge, {
+          ...sandboxBase,
+          timeoutMs: codeUsesOrchestration(source) ? orchestrationTimeoutMs : this.config.executor.timeoutMs,
+          ...(prepared.javascript ? { transpiledCode: prepared.javascript } : {}),
+          ...(prepared.sourceMap ? { transpiledSourceMap: prepared.sourceMap } : {}),
+          signal: runSignal,
+        });
+        for (const line of result.logs) {
+          if (nestedLogChars > this.config.executor.maxOutputChars) break;
+          nestedLogChars += line.length;
+          nestedLogs.push(nestedLogChars > this.config.executor.maxOutputChars
+            ? `[${request.program}] (nested program logs truncated)`
+            : `[${request.program}] ${line}`);
+        }
+        if (result.terminationReason !== "completed") {
+          const outcome = executionOutcomeFromTermination(result.terminationReason);
+          throw Object.assign(
+            new Error(`Program ${request.program} ${outcome.replace("_", " ")}: ${result.error ?? "no result"}`),
+            { programOutcome: outcome },
+          );
+        }
+        operation.succeed(undefined);
+        return result.value;
+      } catch (error) {
+        const outcome = (error as { programOutcome?: "failed" | "aborted" | "timed_out" }).programOutcome
+          ?? executionOutcomeFromError(error, runSignal);
+        operation.fail(stage, error, outcome);
+        throw error;
+      }
+    };
+    this.#nestedRunners.set(options.parentToolCallId, {
+      kernel: python ? "python" : "typescript",
+      run: runNestedProgram,
+    });
     try {
       sandboxResult = await runtime.execute(
         code,
-        async (ref, args, runtimeSignal) => {
+        hostCall = async (ref, args, runtimeSignal) => {
           const callContext = { ...baseContext, signal: runtimeSignal };
           switch (ref) {
             case "fabric.$providers":
@@ -962,16 +1095,11 @@ export class FabricExecutionService {
           }
         },
         {
+          ...sandboxBase,
           timeoutMs: effectiveTimeoutMs,
-          cwd: options.context.cwd,
-          memoryLimitBytes: this.config.executor.memoryLimitBytes,
-          maxLogChars: this.config.executor.maxOutputChars,
-          minimumTimeoutMsForHostCall,
-          ...(!python ? { piToolCanonicalFields } : {}),
           ...(checked.javascript ? { transpiledCode: checked.javascript } : {}),
           ...(checked.sourceMap ? { transpiledSourceMap: checked.sourceMap } : {}),
           ...(options.strings ? { strings: options.strings } : {}),
-          ...(options.tokenBudget !== undefined ? { tokenBudget: options.tokenBudget } : {}),
           ...(options.signal ? { signal: options.signal } : {}),
         },
       );
@@ -984,6 +1112,7 @@ export class FabricExecutionService {
       }
       throw error;
     } finally {
+      this.#nestedRunners.delete(options.parentToolCallId);
       await this.registry.endInvocation(options.parentToolCallId);
       flushEmit();
     }
@@ -1013,7 +1142,7 @@ export class FabricExecutionService {
       success: succeeded,
       kernel: python ? "python" : "typescript",
       value: sanitizedValue.value,
-      logs: sandboxResult.logs.map(sanitizeFabricMediaText),
+      logs: [...sandboxResult.logs, ...nestedLogs].map(sanitizeFabricMediaText),
       ...(sanitizedValue.images.length > 0 ? { media: sanitizedValue.images } : {}),
       audits,
       phases,

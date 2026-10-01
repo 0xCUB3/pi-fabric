@@ -105,6 +105,9 @@ All calls return promises. Fields ending in `?` are optional; `unknown` marks pr
 | `decisions.wait({id,timeoutMs?})` | the record once answered/expired/cancelled (still `open` on timeout): `{status,answer?:{optionId?,text?,answeredBy,via,at},...}` |
 | `decisions.list({status?,holder?,limit?}?)` | records newest first; read-only |
 | `decisions.answer({id,optionId?,text?})` / `decisions.cancel({id})` | the updated record; refused for `"user"` holders, other participants' holds, and decisions raised in the same call |
+| `programs.save({name,code?,kind?,kernel?,jevProgram?,description?,inputSchema?})` | `{ref:"name@digest12",digest}`; always a candidate; identical content returns the same ref |
+| `programs.list({name?,status?}?)` / `programs.get({ref})` | summaries `{ref,name,digest,kind,kernel?,status,createdAt,...}` / the full record; read-only |
+| `programs.run({ref,input?,requirePromoted?})` | the program's return value; runs nested with this program's capabilities and approvals; `input` is its `input` global |
 | `jev.evaluate(args)` | `{model,answers,usage:{input_tokens,output_tokens}}`; typed Choice/Noul/Score answers, not generated text |
 | `jev.run({program,input})` | terminal `FabricJevRun`: `{id,state,result?,error?,evaluations,toolCalls,usage,events,nextSequence,logs,...}` |
 | `jev.spawn({program,input,observe?})` | `FabricJevRun` initially `running`; session-owned, not restart-durable |
@@ -115,6 +118,8 @@ All calls return promises. Fields ending in `?` are optional; `unknown` marks pr
 | `jev.stop({id})` | terminal run envelope after cancellation/cleanup; no rollback of already-issued effects |
 
 `decisions.*` waits on a human or holder without blocking a UI; a person answers with `/fabric decisions` or `pi-fabric decisions answer`. Never try to answer your own approval. See [durable decisions](../../../docs/decisions.md).
+
+`programs.*` stores reusable programs by content digest; a ref is `name` (latest promoted, else latest candidate), `name@<digest prefix ≥12>`, or a full digest. Only the user promotes or retires (`/fabric programs`). See [saved programs](../../../docs/programs.md).
 
 `thinking.set` changes Main's reasoning effort for a bounded scope, clamped into `thinking.bounds` and the model's levels; it never fights a level the user changed meanwhile. See [thinking control](../../../docs/thinking.md).
 

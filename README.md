@@ -128,6 +128,7 @@ Pi loads advanced patterns after direct user invocation. Run `/skill:fabric-guid
 | Multi-model compare-not-merge deliberation or act mode | `/skill:fabric-fusion Deliberate this design across models.` |
 | One command that chooses advisor or supervisor | `/skill:fabric-ambient advisor Focus on migration correctness.` |
 | A durable team coordinating through versioned tasks | `/skill:fabric-swarm Coordinate this migration across owned task partitions.` |
+| A step graph that survives restarts, with human approval nodes | `/skill:fabric-graph Run fetch, test, and an approval gate before release as a resumable graph.` |
 | Evidence-gated edits with postconditions | `/skill:fabric-schema Make this parser change only if focused tests stay green.` |
 | Typed semantic judgments or bounded reactive loops | `/skill:fabric-jev Build a ticket triage loop with an explicit review path and evaluation budget.` |
 
@@ -156,6 +157,7 @@ See the [interface & commands reference](docs/interface.md) for every view, keyb
 - [Prompt cache](docs/prompt-cache.md): honest cache observations and optional, time-bounded native warming leases.
 - [Thinking control](docs/thinking.md): scoped host-session reasoning effort with configured bounds that children inherit and never widen.
 - [Durable decisions](docs/decisions.md): pending approvals and questions in the project mesh, headless approvals, routed child dialogs, `/fabric decisions`, and the `pi-fabric decisions` CLI.
+- [Saved programs](docs/programs.md): content-addressed programs, nested `programs.run` with the caller's capabilities, `/fabric programs`, and host runs through `/fabric run` or an event.
 - [Memory & recall](docs/memory-recall.md): compact ranked hits, uniform follow calls, lossless expansion, and guest-local `memory.walk` computation.
 - [Interface & commands](docs/interface.md): dashboard, settings, keybindings, slash commands, and headless runs.
 - [Agents, actors & mesh](docs/agents.md): model handoff, `/fabric prewalk`, runners, transports, actors, councils, recursive queries, and durable coordination.

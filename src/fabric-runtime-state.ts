@@ -111,6 +111,8 @@ import { AgentsProvider } from "./providers/agents-provider.js";
 import { CompactProvider } from "./providers/compact-provider.js";
 import { CacheProvider } from "./providers/cache-provider.js";
 import { ThinkingProvider } from "./providers/thinking-provider.js";
+import { ProgramsProvider } from "./providers/programs-provider.js";
+import { ProgramStore, programsDirectory } from "./programs/store.js";
 import { FabricThinkingController } from "./thinking-control.js";
 import { PrewalkProvider } from "./providers/prewalk-provider.js";
 import { ComponentsProvider } from "./providers/components-provider.js";
@@ -520,6 +522,7 @@ export class FabricRuntimeState {
       this.#registry.markUnavailable("cache", "Native prompt-cache access is unavailable in managed hosts");
       this.#registry.markUnavailable("thinking", "Host thinking control is unavailable in managed hosts");
       this.#registry.markUnavailable("decisions", "Durable decisions are unavailable in managed hosts");
+      this.#registry.markUnavailable("programs", "Saved programs are unavailable in managed hosts");
       // Closed-world hosts must never construct unused native managers, stores or model history.
       for (const name of ["agents", "schema", "compact", "memory", "mesh", "state"]) {
         if (["agents", "schema", "compact"].includes(name) || this.#managedHost.has(name)) {
@@ -544,6 +547,15 @@ export class FabricRuntimeState {
       provider: "thinking",
       description: "Bounded host-session thinking control",
       create: () => new ThinkingProvider(this.thinking, sessionId),
+    }));
+    await builtins.install(createProviderComponent({
+      provider: "programs",
+      description: "Content-addressed saved programs",
+      create: () => new ProgramsProvider(
+        new ProgramStore(programsDirectory(context.cwd)),
+        () => (this.#config ?? DEFAULT_FABRIC_CONFIG).executor.kernel,
+        (parentToolCallId) => this.#execution?.nestedProgramRunner(parentToolCallId),
+      ),
     }));
     const fabricSessionId = process.env.PI_FABRIC_SESSION_ID?.trim() || sessionId;
     const ownsPersistentActorRegistry =
