@@ -62,6 +62,8 @@ interface FabricAgentRequest {
   model?: string;
   persona?: string;
   thinking?: FabricThinking;
+  /** Child thinking bounds; must lie inside this session's bounds. Levels outside are clamped. */
+  thinkingBounds?: FabricThinkingBounds;
   tools?: string[];
   timeoutMs?: number;
   extensions?: boolean;
@@ -246,6 +248,8 @@ interface FabricAgentHandle {
   generation?: number;
   model?: string;
   thinking?: FabricThinking;
+  /** Present only when the requested level was clamped into thinking bounds. */
+  requestedThinking?: FabricThinking;
   actorId?: string;
   actorName?: string;
   sessionId?: string;
@@ -1357,6 +1361,27 @@ interface FabricCacheApi {
   release(args: { id: string }): Promise<{ released: boolean; cleanupError: string | null }>;
 }
 
+interface FabricThinkingBounds { min?: FabricThinking; max?: FabricThinking }
+interface FabricThinkingOverride {
+  level: FabricThinking;
+  scope: "turn" | "turns" | "session";
+  remainingTurns?: number;
+  reason?: string;
+  setAt: number;
+}
+interface FabricThinkingStatus {
+  level: FabricThinking;
+  available: FabricThinking[];
+  bounds: { min: FabricThinking; max: FabricThinking };
+  baseline: FabricThinking;
+  override?: FabricThinkingOverride;
+}
+interface FabricThinkingApi {
+  status(): Promise<FabricThinkingStatus>;
+  set(args: { level: FabricThinking; scope?: "turn" | "turns" | "session"; turns?: number; reason?: string }): Promise<FabricThinkingStatus & { clamped?: true; requested?: FabricThinking }>;
+  reset(): Promise<FabricThinkingStatus>;
+}
+
 interface FabricCompactApi {
   request(args?: {
     reason?: string;
@@ -1475,6 +1500,7 @@ declare const schema: FabricSchemaApi;
 declare const components: FabricComponentsApi;
 declare const compact: FabricCompactApi;
 declare const cache: FabricCacheApi;
+declare const thinking: FabricThinkingApi;
 declare const prewalk: FabricPrewalkApi;
 ${JEV_GUEST_DECLARATIONS}
 declare const council: FabricCouncilApi;

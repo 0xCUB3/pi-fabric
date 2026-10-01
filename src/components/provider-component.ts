@@ -19,6 +19,7 @@ export const FABRIC_COMPONENT_PROVIDER_NAMES = [
   "schema",
   "compact",
   "cache",
+  "thinking",
   "prewalk",
   "agents",
   "memory",

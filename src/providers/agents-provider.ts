@@ -612,6 +612,10 @@ export class AgentsProvider implements FabricProvider {
           ...(request.residency === "durable" && request.cwd !== undefined
             ? { cwd: this.manager.resolveCwd(request.cwd) }
             : {}),
+          // The resident host does not know this session's bounds: send them narrowed.
+          ...(request.residency === "durable"
+            ? { thinkingBounds: this.manager.childThinkingBounds(request.thinkingBounds) }
+            : {}),
         }, context.extensionContext.sessionManager?.getEntries?.() ?? []);
         const handle = durableRequest.residency === "durable"
           ? await this.#resident().spawnAgent(durableRequest, context.signal)

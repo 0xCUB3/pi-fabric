@@ -91,6 +91,7 @@ import {
 import { buildSkillReferenceGuidance } from "./core/skill-references.js";
 import { createFabricExecTool } from "./fabric-exec-tool.js";
 import { FabricState } from "./fabric-state.js";
+import { FABRIC_THINKING_BOUNDS_ENV } from "./thinking.js";
 import { classifyToolResult } from "./repairs/classify.js";
 import { getActiveRepairCompiler } from "./repairs/active.js";
 import { piHostCompatibilityWarning } from "./host-compatibility.js";
@@ -621,7 +622,16 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
         if (context.hasUI) context.ui.notify(warning, "warning");
       }
     }
+    state.thinking.invalidate();
     await state.bootstrap(context);
+    // A Fabric child narrows its level into the parent's inherited bounds.
+    if (process.env[FABRIC_THINKING_BOUNDS_ENV] !== undefined && state.bootstrapped) {
+      try {
+        state.thinking.enforceBounds(context);
+      } catch (error) {
+        console.warn(`[pi-fabric] thinking bounds: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
     // bootstrap() cancels any live arm; the borrowed Main model survives so a
     // new session that inherited the in-place executor can snap back.
     await restoreBorrowedInPlaceMain(state.prewalk, pi, context);
@@ -633,6 +643,7 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
   // Branch changes move the leaf: emitted echoes and spent reminder budget
   // must track it exactly. Rewind removes abandoned-branch residue.
   pi.on("session_tree", async (_event, context) => {
+    state.thinking.invalidate();
     proxyContract.reset();
     refreshProxyLedger(context);
     // Pi emits session_tree before it clears and rebuilds the transcript:
@@ -655,7 +666,13 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
     if (state.initialized) await state.publishHostLifecycle("pi.agent_start", event);
   });
 
-  pi.on("agent_end", async (event) => {
+  pi.on("agent_end", async (event, context) => {
+    try {
+      // Turn-scoped thinking overrides revert here, even before activation.
+      state.thinking.agentEnded(context);
+    } catch (error) {
+      console.warn(`[pi-fabric] thinking revert failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
     if (state.initialized) await state.publishHostLifecycle("pi.agent_end", event);
   });
 

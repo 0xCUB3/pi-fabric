@@ -17,6 +17,7 @@ const allowedEnforceRefs = new Set([
   "compact.status",
   "compact.pressure",
   "cache.status",
+  "thinking.status",
   "components.list",
   "components.describe",
   "components.status",

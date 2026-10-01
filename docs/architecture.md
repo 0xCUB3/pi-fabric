@@ -20,6 +20,7 @@ ActionRegistry ◀── staged commit ── ComponentSupervisor
     ├── memory.*
     ├── compact.*
     ├── cache.* local observations + optional native warming leases
+    ├── thinking.* bounded host-session reasoning effort
     ├── components.* kernel diagnostics and reload
     └── external providers
 

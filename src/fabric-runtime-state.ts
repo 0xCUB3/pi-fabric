@@ -107,6 +107,8 @@ import {
 import { AgentsProvider } from "./providers/agents-provider.js";
 import { CompactProvider } from "./providers/compact-provider.js";
 import { CacheProvider } from "./providers/cache-provider.js";
+import { ThinkingProvider } from "./providers/thinking-provider.js";
+import { FabricThinkingController } from "./thinking-control.js";
 import { PrewalkProvider } from "./providers/prewalk-provider.js";
 import { ComponentsProvider } from "./providers/components-provider.js";
 import type { McpProviderHooks } from "./providers/mcp-provider.js";
@@ -166,6 +168,7 @@ export interface FabricRuntimeStateOptions {
   prewalk?: PrewalkController;
   prewalkDrift?: PrewalkDriftTracker;
   sessionApprovals?: FabricSessionApprovals;
+  thinking?: FabricThinkingController;
   paths?: FabricRuntimePaths;
   entryIdentity?: FabricLoadedFileIdentity;
 }
@@ -212,6 +215,7 @@ export class FabricRuntimeState {
   readonly prewalk: PrewalkController;
   readonly prewalkDrift: PrewalkDriftTracker;
   readonly sessionApprovals: FabricSessionApprovals;
+  readonly thinking: FabricThinkingController;
   readonly #paths: FabricRuntimePaths | undefined;
   readonly #managedHost: FabricManagedHost | undefined;
   readonly #entryIdentity: FabricLoadedFileIdentity | undefined;
@@ -227,6 +231,8 @@ export class FabricRuntimeState {
     this.prewalk = options.prewalk ?? new PrewalkController();
     this.prewalkDrift = options.prewalkDrift ?? new PrewalkDriftTracker();
     this.sessionApprovals = options.sessionApprovals ?? new FabricSessionApprovals();
+    this.thinking = options.thinking ??
+      new FabricThinkingController(pi, () => this.#config?.thinking?.bounds ?? {});
     this.#paths = options.paths;
     this.#managedHost = options.managedHost;
     this.#entryIdentity = options.entryIdentity;
@@ -480,6 +486,7 @@ export class FabricRuntimeState {
     if (this.#managedHost) {
       this.#registry.markUnavailable("jev", "Jev programs are unavailable in managed hosts");
       this.#registry.markUnavailable("cache", "Native prompt-cache access is unavailable in managed hosts");
+      this.#registry.markUnavailable("thinking", "Host thinking control is unavailable in managed hosts");
       // Closed-world hosts must never construct unused native managers, stores or model history.
       for (const name of ["agents", "schema", "compact", "memory", "mesh", "state"]) {
         if (["agents", "schema", "compact"].includes(name) || this.#managedHost.has(name)) {
@@ -499,6 +506,11 @@ export class FabricRuntimeState {
       provider: "cache",
       description: "Local prompt-cache observations and scoped native warming",
       create: () => new CacheProvider(this.pi, context, identity.kind === "main"),
+    }));
+    await builtins.install(createProviderComponent({
+      provider: "thinking",
+      description: "Bounded host-session thinking control",
+      create: () => new ThinkingProvider(this.thinking, sessionId),
     }));
     const fabricSessionId = process.env.PI_FABRIC_SESSION_ID?.trim() || sessionId;
     const ownsPersistentActorRegistry =
@@ -639,6 +651,7 @@ export class FabricRuntimeState {
         : {}),
       resolveInheritedSessionPins: () =>
         resolveInheritedSessionPins(context.sessionManager?.getEntries?.() ?? []),
+      thinkingBounds: () => this.#config?.thinking?.bounds ?? {},
       resolveParticipantGuidance: ({ model, runner }) => {
         const targetModel = model ?? (runner === "pi" && context.model
           ? `${context.model.provider}/${context.model.id}`

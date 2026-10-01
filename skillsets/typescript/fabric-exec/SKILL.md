@@ -98,6 +98,9 @@ All calls return promises. Fields ending in `?` are optional; `unknown` marks pr
 | `cache.status({target?}?)` | Local session cache observations, live leases, capability/cleanup diagnostics; observations do not prove residency |
 | `cache.hold({target?,durationMs,maxRefreshes?,maxCostUsd?})` | `{status:"held",id,scope,sessionId,model,expiresAt}` or an unsupported/unavailable result with a reason; paid native opt-in, no fallback; cost/count bounds currently unsupported |
 | `cache.release({id})` | `{released,cleanupError}`; session-owned holds only; expiry/cleanup is not a refund |
+| `thinking.status()` | `{level,available,bounds:{min,max},baseline,override?:{level,scope,remainingTurns?,reason?,setAt}}` |
+| `thinking.set({level,scope?,turns?,reason?})` | status plus `clamped:true,requested` when clamped; `scope` `"turn"` (default, reverts at agent_end) / `"turns"` (needs `turns` 1–20) / `"session"` |
+| `thinking.reset()` | status after restoring the baseline level |
 | `jev.evaluate(args)` | `{model,answers,usage:{input_tokens,output_tokens}}`; typed Choice/Noul/Score answers, not generated text |
 | `jev.run({program,input})` | terminal `FabricJevRun`: `{id,state,result?,error?,evaluations,toolCalls,usage,events,nextSequence,logs,...}` |
 | `jev.spawn({program,input,observe?})` | `FabricJevRun` initially `running`; session-owned, not restart-durable |
@@ -106,6 +109,8 @@ All calls return promises. Fields ending in `?` are optional; `unknown` marks pr
 | `jev.join({id})` | alias for `jev.wait`, with the same arguments, result, and cancellation behavior |
 | `jev.advise({id,eventId,message})` | `{delivered,reason?}`; current observed event only; explicit delivery, agent approvals, freshness and feedback gates apply |
 | `jev.stop({id})` | terminal run envelope after cancellation/cleanup; no rollback of already-issued effects |
+
+`thinking.set` changes Main's reasoning effort for a bounded scope, clamped into `thinking.bounds` and the model's levels; it never fights a level the user changed meanwhile. See [thinking control](../../../docs/thinking.md).
 
 `cache` targets the local Pi session (`self`); `main` is accepted only in root runtimes. Holds require a compatible native scoped-warming API, are bounded to 1–1800 seconds, and never change native settings. Current stock SDKs return unsupported. Never simulate warming with prompts. See [prompt-cache contracts](../../../docs/prompt-cache.md).
 

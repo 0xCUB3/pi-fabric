@@ -6,7 +6,7 @@ import type {
 import type { FabricAgentRunner, FabricAgentTransport, FabricPythonRuntime } from "../config.js";
 import type { FabricKernel } from "../runtime/kernel.js";
 import type { ThinkingTransferInput } from "./thinking-transfer.js";
-import type { FabricThinking } from "../thinking.js";
+import type { FabricThinking, FabricThinkingBounds } from "../thinking.js";
 import type { FabricParticipantResidency } from "../topology/types.js";
 import type { InheritedSessionPin } from "./session-pins.js";
 
@@ -54,6 +54,8 @@ export interface AgentRunRequest {
   /** Veda persona name; only used when runner is "veda". */
   persona?: string;
   thinking?: FabricThinking;
+  /** Child thinking bounds; must lie inside the caller's effective bounds. */
+  thinkingBounds?: FabricThinkingBounds;
   tools?: string[];
   timeoutMs?: number;
   extensions?: boolean;
@@ -124,6 +126,8 @@ export interface AgentRunRecord {
   cwd: string;
   model?: string;
   thinking?: FabricThinking;
+  /** Set only when the requested level was clamped into thinking bounds. */
+  requestedThinking?: FabricThinking;
   actorId?: string;
   actorName?: string;
   capabilityRequirements?: string[];
@@ -169,6 +173,8 @@ export interface AgentHandleInfo {
   cwd: string;
   model?: string;
   thinking?: FabricThinking;
+  /** Set only when the requested level was clamped into thinking bounds. */
+  requestedThinking?: FabricThinking;
   actorId?: string;
   actorName?: string;
   capabilityRequirements?: string[];
@@ -212,6 +218,8 @@ export interface AgentWorkerOptions {
   fabricExtensionPath?: string;
   model?: string;
   thinking?: string;
+  /** Serialized effective bounds forwarded as PI_FABRIC_THINKING_BOUNDS. */
+  thinkingBounds?: string;
   systemPrompt?: string;
   persistSession?: boolean;
   modelAdmission?: "strict" | "permissive";

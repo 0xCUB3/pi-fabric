@@ -351,6 +351,8 @@ const main = async (): Promise<void> => {
         : {}),
       PI_FABRIC_DEPTH: String(options.depth),
       PI_FABRIC_PARENT_RUN: options.id,
+      // A child Fabric intersects its own thinking.bounds with these.
+      ...(options.thinkingBounds ? { PI_FABRIC_THINKING_BOUNDS: options.thinkingBounds } : {}),
       PI_FABRIC_AGENT_NAME: options.name,
       ...(options.mainAgentId ? { PI_FABRIC_MAIN_AGENT_ID: options.mainAgentId } : {}),
       ...(options.fabricSessionId ? { PI_FABRIC_SESSION_ID: options.fabricSessionId } : {}),

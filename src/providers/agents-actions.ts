@@ -37,6 +37,15 @@ const runProperties = {
     type: "string",
     enum: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
   },
+  thinkingBounds: {
+    type: "object",
+    properties: {
+      min: { type: "string", enum: ["off", "minimal", "low", "medium", "high", "xhigh", "max"] },
+      max: { type: "string", enum: ["off", "minimal", "low", "medium", "high", "xhigh", "max"] },
+    },
+    additionalProperties: false,
+    description: "Optional child thinking bounds; must lie inside this session's bounds (omitted ends inherit). Child Fabric sessions never widen them. thinking outside the effective bounds is clamped and reported as requestedThinking.",
+  },
   tools: { type: "array", items: { type: "string" } },
   timeoutMs: {
     type: "number",

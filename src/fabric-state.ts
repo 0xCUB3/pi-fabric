@@ -22,6 +22,7 @@ import {
 import { FabricSessionApprovals } from "./core/approval-controller.js";
 import { PrewalkController } from "./prewalk/controller.js";
 import { PrewalkDriftTracker } from "./prewalk/fs-drift.js";
+import { FabricThinkingController } from "./thinking-control.js";
 import type { PendingFabricHandoff } from "./prewalk/handoff.js";
 import type { AgentToolResultMessage } from "./agents/types.js";
 import type { FabricExecutionResult } from "./execution-service.js";
@@ -81,6 +82,8 @@ export class FabricState {
   readonly prewalk = new PrewalkController();
   readonly prewalkDrift = new PrewalkDriftTracker();
   readonly sessionApprovals = new FabricSessionApprovals();
+  // Eager and cheap: agent_end must revert an override even before activation.
+  readonly thinking: FabricThinkingController;
   #widgetDismissedAt = 0;
 
   constructor(
@@ -91,6 +94,7 @@ export class FabricState {
     this.#options = options;
     this.#managedHost = options.managedHost ? new FabricManagedHost(options.managedHost) : undefined;
     this.#entryIdentity = options.entryIdentity;
+    this.thinking = new FabricThinkingController(pi, () => this.#config?.thinking?.bounds ?? {});
   }
 
   get kernelReloadRequired(): boolean {
@@ -511,6 +515,7 @@ export class FabricState {
         prewalk: this.prewalk,
         prewalkDrift: this.prewalkDrift,
         sessionApprovals: this.sessionApprovals,
+        thinking: this.thinking,
         ...(this.#options.paths ? { paths: this.#options.paths } : {}),
         ...(this.#entryIdentity ? { entryIdentity: this.#entryIdentity } : {}),
       },

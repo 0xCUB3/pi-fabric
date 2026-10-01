@@ -1,4 +1,10 @@
 import { randomUUID } from "node:crypto";
+import {
+  childThinkingBounds,
+  clampThinkingToBounds,
+  serializeThinkingBounds,
+  type FabricThinkingBounds,
+} from "../thinking.js";
 import type { FabricKernel } from "../runtime/kernel.js";
 import fs from "node:fs";
 import os from "node:os";
@@ -181,6 +187,7 @@ interface ManagedAgent extends AgentLifecycleState<AgentRunResult> {
   lastRetriedTransportFailure?: AgentRunResult;
   model?: string;
   thinking?: AgentRunRequest["thinking"];
+  requestedThinking?: AgentRunRequest["thinking"];
   actorId?: string;
   actorName?: string;
   capabilityRequirements?: string[];
@@ -451,6 +458,7 @@ export class AgentManager {
     | undefined;
   readonly #resolveParticipantGuidance: AgentParticipantGuidanceResolver | undefined;
   readonly #resolveInheritedSessionPins: (() => InheritedSessionPin[] | undefined) | undefined;
+  readonly #thinkingBounds: (() => FabricThinkingBounds) | undefined;
   readonly #piModelPreparations = new Map<string, Promise<string | undefined>>();
   readonly #budget: BudgetLedgerState | undefined;
   readonly #budgetOwned: boolean;
@@ -497,6 +505,8 @@ export class AgentManager {
       resolveHandoffCompactionBudget?: (model: string | undefined, cwd: string) => Promise<FabricCompactionBudget>;
       resolveParticipantGuidance?: AgentParticipantGuidanceResolver;
       resolveInheritedSessionPins?: () => InheritedSessionPin[] | undefined;
+      /** Caller's effective thinking bounds (config narrowed by inherited env). */
+      thinkingBounds?: () => FabricThinkingBounds;
     } = {},
   ) {
     this.#semaphore = new AgentAdmission(config.maxConcurrent, Infinity, config.maxDepth);
@@ -520,6 +530,7 @@ export class AgentManager {
     this.#resolveHandoffCompactionBudget = options.resolveHandoffCompactionBudget;
     this.#resolveParticipantGuidance = options.resolveParticipantGuidance;
     this.#resolveInheritedSessionPins = options.resolveInheritedSessionPins;
+    this.#thinkingBounds = options.thinkingBounds;
     this.#currentDepth = Math.max(0, Number(process.env.PI_FABRIC_DEPTH ?? "0") || 0);
     this.#fullCodeMode = options.fullCodeMode ?? true;
     this.#kernel = options.kernel ?? (() => "typescript");
@@ -650,6 +661,11 @@ export class AgentManager {
     }
   }
 
+  /** Effective bounds for a child; requested bounds outside the caller's throw. */
+  childThinkingBounds(requested?: FabricThinkingBounds): FabricThinkingBounds {
+    return childThinkingBounds(this.#thinkingBounds?.() ?? {}, requested);
+  }
+
   async #spawn(request: AgentRunRequest, signal?: AbortSignal): Promise<AgentHandleInfo> {
     if (!this.config.enabled) throw new Error("Agents are disabled in Fabric configuration");
     if (this.#currentDepth >= this.config.maxDepth) {
@@ -694,6 +710,8 @@ export class AgentManager {
     if (request.sessionSeed && request.sessionFile) {
       throw new Error("A agent request cannot combine sessionSeed with sessionFile");
     }
+    // Fail closed before admission or budget side effects.
+    const thinkingBounds = this.childThinkingBounds(request.thinkingBounds);
     const requiresFabricKernel = kernel === "python" || request.kernel === "typescript";
     const tools = this.#childTools(request, runner, requiresFabricKernel);
     if (runner === "claude") mapClaudeTools(tools);
@@ -788,7 +806,12 @@ export class AgentManager {
         this.config.timeoutMs,
         request.timeoutMs,
       );
-      const thinking = request.thinking ?? this.config.thinking;
+      const requestedThinking = request.thinking ?? this.config.thinking;
+      const thinking = requestedThinking
+        ? clampThinkingToBounds(requestedThinking, thinkingBounds)
+        : undefined;
+      const clampedFrom = requestedThinking && thinking !== requestedThinking ? requestedThinking : undefined;
+      const serializedThinkingBounds = serializeThinkingBounds(thinkingBounds);
       const recursive = runner === "pi" && request.recursive === true;
       const extensions = recursive ? true : (request.extensions ?? this.config.extensions);
       const inheritedSessionPins = runner === "pi" && extensions
@@ -865,6 +888,7 @@ export class AgentManager {
           : []),
         ...(model ? ["--model", model] : []),
         ...(thinking ? ["--thinking", thinking] : []),
+        ...(serializedThinkingBounds ? ["--thinking-bounds", serializedThinkingBounds] : []),
         ...(systemPrompt ? ["--system-prompt", systemPrompt] : []),
         "--persist-session",
         String(request.persistSession === true),
@@ -939,6 +963,7 @@ export class AgentManager {
         abortHandler: undefined,
         ...(model ? { model } : {}),
         ...(thinking ? { thinking } : {}),
+        ...(clampedFrom ? { requestedThinking: clampedFrom } : {}),
         ...(request.actorId ? { actorId: request.actorId } : {}),
         ...(request.actorName ? { actorName: request.actorName } : {}),
         ...(request.capabilityRequirements
@@ -1868,6 +1893,7 @@ export class AgentManager {
       ...(managed.residency === "durable" ? { residency: "durable" as const } : {}),
       ...(model ? { model } : {}),
       ...(thinking ? { thinking } : {}),
+      ...(managed.requestedThinking ? { requestedThinking: managed.requestedThinking } : {}),
       ...(managed.actorId ? { actorId: managed.actorId } : {}),
       ...(managed.actorName ? { actorName: managed.actorName } : {}),
       ...(managed.capabilityRequirements
@@ -1930,6 +1956,7 @@ export class AgentManager {
       ...(budget ? { budget } : {}),
       ...(model ? { model } : {}),
       ...(thinking ? { thinking } : {}),
+      ...(managed.requestedThinking ? { requestedThinking: managed.requestedThinking } : {}),
       ...(managed.actorId ? { actorId: managed.actorId } : {}),
       ...(managed.actorName ? { actorName: managed.actorName } : {}),
       ...(managed.capabilityRequirements

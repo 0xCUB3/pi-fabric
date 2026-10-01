@@ -17,7 +17,16 @@ import {
 import type { FabricComponentEntry } from "./components/types.js";
 import type { FabricRisk } from "./protocol.js";
 import type { FabricKernel } from "./runtime/kernel.js";
-import { DEFAULT_FABRIC_THINKING, isFabricThinking, type FabricThinking } from "./thinking.js";
+import {
+  DEFAULT_FABRIC_THINKING,
+  FABRIC_THINKING_BOUNDS_ENV,
+  inheritedThinkingBounds,
+  intersectThinkingBounds,
+  isFabricThinking,
+  normalizeThinkingBounds,
+  type FabricThinking,
+  type FabricThinkingBounds,
+} from "./thinking.js";
 import {
   defaultCodePreviewSettings,
   normalizeCodePreviewSettings,
@@ -365,6 +374,11 @@ export interface FabricModelsConfig {
   aliases: FabricModelAliases;
 }
 
+export interface FabricThinkingConfig {
+  /** Inclusive host/child thinking bounds; empty means the model's levels. */
+  bounds: FabricThinkingBounds;
+}
+
 export interface FabricConfig {
   fullCodeMode: boolean;
   executor: FabricExecutorConfig;
@@ -386,6 +400,7 @@ export interface FabricConfig {
   trace: FabricTraceConfig;
   schema: FabricSchemaConfig;
   speculation: FabricSpeculationConfig;
+  thinking: FabricThinkingConfig;
   codePreview: CodePreviewSettings;
 }
 
@@ -586,6 +601,7 @@ export const DEFAULT_FABRIC_CONFIG: FabricConfig = {
     entryTtlMs: 180_000,
     mcpAllowlist: [],
   },
+  thinking: { bounds: {} },
   codePreview: defaultCodePreviewSettings(),
 };
 
@@ -1470,6 +1486,10 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
         ),
       ].slice(0, 256),
     },
+    thinking: {
+      // Bounds are a ceiling policy: malformed values fail closed.
+      bounds: normalizeThinkingBounds(objectValue(input.thinking).bounds, "thinking.bounds"),
+    },
     codePreview: normalizeCodePreviewSettings(input.codePreview),
   };
 };
@@ -1615,7 +1635,15 @@ const resolveFabricConfig = (
   ) {
     merged.fullCodeMode = inheritedFullCodeMode === "true";
   }
-  return normalizeFabricConfig(merged);
+  const normalized = normalizeFabricConfig(merged);
+  if (applyEnvironmentOverrides && process.env[FABRIC_THINKING_BOUNDS_ENV] !== undefined) {
+    // A child only narrows its own bounds by the parent's; never widens them.
+    const inherited = inheritedThinkingBounds();
+    if (inherited) {
+      normalized.thinking.bounds = intersectThinkingBounds(inherited, normalized.thinking.bounds);
+    }
+  }
+  return normalized;
 };
 
 export const loadFabricConfigForScope = (

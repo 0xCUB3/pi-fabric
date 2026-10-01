@@ -64,6 +64,7 @@ export const parseWorkerOptions = (
   const args = argumentMap(argv);
   const model = optional(args, "model");
   const thinking = optional(args, "thinking");
+  const thinkingBounds = optional(args, "thinking-bounds");
   const fabricExtensionPath = optional(args, "fabric-extension");
   const schemaFile = optional(args, "schema-file");
   const imagesFile = optional(args, "images-file");
@@ -185,6 +186,7 @@ export const parseWorkerOptions = (
     ...(fabricExtensionPath ? { fabricExtensionPath } : {}),
     ...(model ? { model } : {}),
     ...(thinking ? { thinking } : {}),
+    ...(thinkingBounds ? { thinkingBounds } : {}),
     ...(systemPrompt ? { systemPrompt } : {}),
     ...(persistSession ? { persistSession: true } : {}),
     ...(modelAdmission ? { modelAdmission } : {}),

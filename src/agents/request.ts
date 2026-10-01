@@ -1,5 +1,5 @@
 import type { AgentRunRequest } from "./types.js";
-import { isFabricThinking } from "../thinking.js";
+import { isFabricThinking, normalizeThinkingBounds } from "../thinking.js";
 import { aliasThinking, type FabricModelAliases } from "../core/model-resolution.js";
 
 const stringArray = (value: unknown): string[] | undefined => Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : undefined;
@@ -46,6 +46,9 @@ export const normalizeAgentRunRequest = (
       ? `${defaults.inheritedModel.provider}/${defaults.inheritedModel.id}`
       : undefined;
   const kernel = checkedKernel(args.kernel);
+  const thinkingBounds = args.thinkingBounds === undefined
+    ? undefined
+    : normalizeThinkingBounds(args.thinkingBounds, "thinkingBounds");
   if (args.recursive === true && args.extensions === false) {
     throw new Error("Recursive Fabric requires extensions enabled; omit recursive or extensions: false");
   }
@@ -64,6 +67,7 @@ export const normalizeAgentRunRequest = (
       ? { persona: args.persona.trim() }
       : {}),
     ...(thinking ? { thinking } : {}),
+    ...(thinkingBounds ? { thinkingBounds } : {}),
     ...(tools ? { tools } : {}),
     ...(timeoutMs !== undefined ? { timeoutMs } : {}),
     ...(typeof args.extensions === "boolean"
