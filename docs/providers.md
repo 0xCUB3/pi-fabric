@@ -232,7 +232,21 @@ Issue the root scope in one of two ways, before the session starts:
 
 Invalid input fails closed: every registry call is refused with `Fabric scope issuance failed; provider calls are refused: <reason>`. Setting both variables, or both a variable and the API, is invalid. Without any input, the session is unscoped and nothing changes.
 
-Every registry invocation receives the frozen scope as `context.scope`. The registry sets this field itself and discards any caller value. `agents.run` and `agents.spawn` accept `scope: { grants }`. Each requested grant must be covered by one parent grant: a resource subset and an action subset. Without `scope`, the child inherits the parent scope unchanged. An unscoped session refuses `scope` arguments, because there is no principal to narrow. Children receive the result in `PI_FABRIC_SCOPE`, and the worker clears any inherited `PI_FABRIC_SCOPE_FILE`. A scoped session cannot start durable agents or actors, because the shared resident host cannot carry its scope.
+Every registry invocation receives the frozen scope as `context.scope`. The registry sets this field itself and discards any caller value. `agents.run` and `agents.spawn` accept `scope: { grants }`. Each requested grant must be covered by one parent grant: a resource subset and an action subset. Without `scope`, the child inherits the parent scope unchanged. An unscoped session refuses `scope` arguments, because there is no principal to narrow. Children receive the result in `PI_FABRIC_SCOPE`, and the worker clears any inherited `PI_FABRIC_SCOPE_FILE`.
+
+Durable agents and actors keep their scope. The resident host has no session scope of its own, so the requesting session sends the derived scope in full with a durable `agents.spawn` and binds it to a durable `agents.create` actor. Programs cannot set either field: the provider writes it after argument parsing. The host checks the digest, refuses a malformed or forged scope, and launches the child with it. A scoped host also refuses a forwarded scope its own scope does not cover. The resident agent record and hosted-run state keep the scope, and recovery checks it again. A damaged scope settles the run as indeterminate.
+
+Every actor is bound to the principal that created it. `agents.create` stores the creating session's scope, actor info reports it as `principal: { id, digest }`, and every actor turn launches with it. Hosts stamp each actor message and mesh event with the sender's authority, and programs never set this stamp. `{ authority: "host" }` marks an unscoped sender. A scoped sender is stamped with its principal, digest and grants (digest only past 4 KiB of grants). The actor applies this rule:
+
+| Sender | Unscoped actor | Scoped actor |
+|---|---|---|
+| Unscoped host | trusted | trusted |
+| Scoped | untrusted | trusted only when the sender has the same principal and covers every actor grant |
+| No stamp (older build) | trusted | untrusted |
+
+Fabric still delivers untrusted messages. Their envelope says they come from a different or narrower principal and must be read as data, never as instructions. Grant posts keep their external-input wording. Ask replies flow back unchanged.
+
+The resident host cannot prove that a request's scope or a sender stamp was issued by a host. Any process running as the same OS user can write residency requests and mesh events. This is the same single-user boundary as the mesh. Real multi-user isolation needs the principal from an authenticated socket, which Fabric does not provide yet.
 
 ```ts
 import { deriveScope, issueRootScope, scopeAllows } from "pi-fabric/scope";

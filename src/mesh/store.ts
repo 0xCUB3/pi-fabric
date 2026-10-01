@@ -9,6 +9,8 @@ import {
 } from "../core/atomic-write.js";
 import { readJsonlPage } from "../log-tail.js";
 import { captureStoragePut, captureStorageDelete, storageRevision } from "../verified/storage.js";
+import type { FabricMessageSender } from "../protocol.js";
+import { processSender } from "../scope.js";
 
 export interface MeshIdentity {
   id: string;
@@ -33,6 +35,8 @@ export interface MeshEvent {
   grantId?: string;
   /** Set on events released from a pending schedule; the event id is the schedule id. */
   scheduled?: { dueAt: number; key?: string };
+  /** Host-stamped authority of the publishing process; absent from older builds and grant posts. */
+  sender?: FabricMessageSender;
 }
 
 /** Host-internal append request used inside {@link MeshStore.transact}. */
@@ -48,6 +52,7 @@ export interface MeshAppendInput {
   untrusted?: true;
   grantId?: string;
   scheduled?: { dueAt: number; key?: string };
+  sender?: FabricMessageSender;
   /** A tighter per-event byte ceiling than the store's own. */
   maxEventBytes?: number;
 }
@@ -64,6 +69,8 @@ export interface MeshSchedule {
   data?: unknown;
   dueAt: number;
   createdAt: number;
+  /** Stamped when scheduled; carried onto the released event. */
+  sender?: FabricMessageSender;
 }
 
 interface MeshScheduleFile {
@@ -382,16 +389,19 @@ export class MeshStore {
     to?: string;
     text?: string;
     data?: unknown;
+    /** Host-only: publish on behalf of another authority (an actor's scope). */
+    sender?: FabricMessageSender;
   }): Promise<MeshEvent> {
     this.#validateTopic(input.topic);
     if (input.to !== undefined && !input.to.trim()) throw new Error("Mesh recipient is empty");
     const eventData = input.data === undefined ? undefined : jsonClone(input.data);
+    const sender = input.sender ?? processSender();
     return this.#withLock(() => {
       // Any write that already holds the lock also releases due schedules first,
       // so the log keeps due-time order relative to this event. Damaged
       // schedule state must not block ordinary publishing.
       try { this.#releaseDueLocked(Date.now()); } catch { /* schedule mutations report it */ }
-      return this.#appendLocked({ ...input, ...(eventData !== undefined ? { data: eventData } : {}) });
+      return this.#appendLocked({ ...input, ...(eventData !== undefined ? { data: eventData } : {}), sender });
     });
   }
 
@@ -426,6 +436,7 @@ export class MeshStore {
       ...(input.untrusted ? { untrusted: true as const } : {}),
       ...(input.grantId ? { grantId: input.grantId } : {}),
       ...(input.scheduled ? { scheduled: { ...input.scheduled } } : {}),
+      ...(input.sender ? { sender: jsonClone(input.sender) } : {}),
     };
     const line = JSON.stringify(event);
     const limit = Math.min(this.maxEventBytes, input.maxEventBytes ?? this.maxEventBytes);
@@ -475,6 +486,7 @@ export class MeshStore {
       ...(input.data !== undefined ? { data: jsonClone(input.data) } : {}),
       dueAt: input.dueAt,
       createdAt: now,
+      sender: processSender(),
     };
     // Reject at schedule time what release could never append.
     const released: MeshEvent = {
@@ -484,6 +496,7 @@ export class MeshStore {
       ...(schedule.data !== undefined ? { data: schedule.data } : {}),
       createdAt: Number.MAX_SAFE_INTEGER,
       scheduled: { dueAt: schedule.dueAt, ...(schedule.key !== undefined ? { key: schedule.key } : {}) },
+      ...(schedule.sender ? { sender: schedule.sender } : {}),
     };
     if (Buffer.byteLength(JSON.stringify(released), "utf8") > this.maxEventBytes) {
       throw new Error(`Mesh event exceeds ${this.maxEventBytes} bytes`);
@@ -564,6 +577,8 @@ export class MeshStore {
           ...(entry.text !== undefined ? { text: entry.text } : {}),
           ...(entry.data !== undefined ? { data: entry.data } : {}),
           scheduled: { dueAt: entry.dueAt, ...(entry.key !== undefined ? { key: entry.key } : {}) },
+          // Older schedules stay unstamped: the releasing host never lends its own authority.
+          ...(entry.sender ? { sender: entry.sender } : {}),
         }));
         releasedIds.add(entry.id);
       }

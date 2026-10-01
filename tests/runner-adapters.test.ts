@@ -17,7 +17,7 @@ import {
   type FabricWorkerRunner,
 } from "../src/runners.js";
 import type { AgentChildQuestionRequest, AgentRunRecord } from "../src/agents/types.js";
-import { issueRootScope } from "../src/scope.js";
+import { issueRootScope, normalizeScope } from "../src/scope.js";
 
 const NONE: FabricRunnerCapabilities = {
   recursiveFabric: false,
@@ -402,6 +402,33 @@ describe("hosted runners", () => {
     expect(await second.wait(kept.id)).toMatchObject({ status: "completed", text: "finished while away" });
     expect(await second.wait(lost.id)).toMatchObject({ status: "failed", outcome: "indeterminate" });
     expect(fake.calls.filter((call) => call.startsWith("start:"))).toHaveLength(2);
+  });
+
+  it("re-attaches a durable run with its forwarded scope and refuses a damaged one", async () => {
+    const root = tempRoot();
+    const attached: FabricHostedRunContext[] = [];
+    const fake = fakeHosted("daemon");
+    fake.adapter.attach = async (_locator, context, reporter) => {
+      attached.push(context);
+      reporter.finish({ status: "completed", output: "back" });
+    };
+    register(fake.adapter);
+    const scope = normalizeScope({ principal: { id: "svc" }, grants: [{ resource: "fs:/repo/**", actions: ["read"] }] });
+    const first = managerFor(root);
+    const kept = await first.spawn({ task: "Keep", runner: "daemon", residency: "durable", inheritedScope: scope });
+    const damaged = await first.spawn({ task: "Damage", runner: "daemon", residency: "durable", inheritedScope: scope });
+    expect(fake.contexts.map((context) => context.scope?.digest)).toEqual([scope.digest, scope.digest]);
+    await first.close();
+    const stateFile = path.join(root, damaged.id, "hosted.json");
+    const state = JSON.parse(fs.readFileSync(stateFile, "utf8")) as { context: { scope: { grants: unknown[] } } };
+    state.context.scope.grants = [{ resource: "fs:*", actions: ["write"] }];
+    fs.writeFileSync(stateFile, JSON.stringify(state));
+    const second = managerFor(root);
+    expect(await second.recoverHostedRuns()).toEqual([kept.id]);
+    expect(attached[0]?.scope).toEqual(scope);
+    const record = JSON.parse(fs.readFileSync(path.join(root, damaged.id, "status.json"), "utf8")) as AgentRunRecord;
+    expect(record).toMatchObject({ status: "failed", outcome: "indeterminate" });
+    expect(record.error).toMatch(/scope is invalid/);
   });
 
   it("settles a run whose runner is not registered after restart as indeterminate", async () => {

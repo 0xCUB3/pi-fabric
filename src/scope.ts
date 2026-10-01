@@ -5,9 +5,9 @@
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import type { FabricScope, FabricScopeAction, FabricScopeGrant } from "./protocol.js";
+import type { FabricMessageSender, FabricScope, FabricScopeAction, FabricScopeGrant } from "./protocol.js";
 
-export type { FabricScope, FabricScopeAction, FabricScopeGrant } from "./protocol.js";
+export type { FabricMessageSender, FabricScope, FabricScopeAction, FabricScopeGrant } from "./protocol.js";
 
 export const FABRIC_SCOPE_ENV = "PI_FABRIC_SCOPE";
 export const FABRIC_SCOPE_FILE_ENV = "PI_FABRIC_SCOPE_FILE";
@@ -179,15 +179,77 @@ export const deriveScope = (parent: FabricScope, grants: readonly FabricScopeGra
   const base = normalizeScope(parent);
   const requested = normalizeGrants(grants);
   for (const grant of requested) {
-    const target = parseResource(grant.resource);
-    const covered = base.grants.some((candidate) =>
-      grant.actions.every((action) => candidate.actions.includes(action)) &&
-      covers(parseResource(candidate.resource), target));
-    if (!covered) {
+    if (!grantCovered(base, grant)) {
       throw new Error(`Scope grant ${grant.resource} [${grant.actions.join(", ")}] is not covered by the parent scope`);
     }
   }
   return freeze(base.principal.id, requested, base.digest);
+};
+
+const grantCovered = (outer: FabricScope, grant: FabricScopeGrant): boolean => {
+  const target = parseResource(grant.resource);
+  return outer.grants.some((candidate) =>
+    grant.actions.every((action) => candidate.actions.includes(action)) &&
+    covers(parseResource(candidate.resource), target));
+};
+
+/** True when `outer` has the same principal and covers every grant of `inner`. */
+export const scopeCovers = (outer: FabricScope, inner: FabricScope): boolean => {
+  const a = normalizeScope(outer);
+  const b = normalizeScope(inner);
+  return a.principal.id === b.principal.id && b.grants.every((grant) => grantCovered(a, grant));
+};
+
+const MAX_SENDER_GRANT_BYTES = 4 * 1024;
+
+/** @internal The host stamp for a message sent with `scope` (absent: unscoped host authority). */
+export const senderStamp = (scope: FabricScope | undefined): FabricMessageSender => {
+  if (!scope) return { authority: "host" };
+  const grants = scope.grants.map((grant) => ({ resource: grant.resource, actions: [...grant.actions] }));
+  // Oversized grants are left out; such a stamp is trusted only on an exact digest match.
+  const fits = Buffer.byteLength(JSON.stringify(grants)) <= MAX_SENDER_GRANT_BYTES;
+  return {
+    authority: "scope",
+    principalId: scope.principal.id,
+    digest: scope.digest,
+    ...(fits ? { grants } : {}),
+    ...(fits && scope.parentDigest ? { parentDigest: scope.parentDigest } : {}),
+  };
+};
+
+/** @internal This process's stamp; failed issuance yields a stamp no actor trusts. */
+export const processSender = (): FabricMessageSender => {
+  try {
+    return senderStamp(sessionScope());
+  } catch {
+    return { authority: "scope", principalId: "", digest: "" };
+  }
+};
+
+/**
+ * @internal Whether an actor bound to `actorScope` may treat a message from
+ * `sender` as coming from its own authority. Unscoped senders are trusted; a
+ * scoped sender must cover the actor's scope; an unstamped (older build)
+ * message is trusted only by an unscoped actor. Malformed stamps never are.
+ */
+export const senderTrusted = (actorScope: FabricScope | undefined, sender: unknown): boolean => {
+  if (sender === undefined) return actorScope === undefined;
+  if (!isObject(sender)) return false;
+  if (sender.authority === "host") return true;
+  if (sender.authority !== "scope" || !actorScope) return false;
+  try {
+    const actor = normalizeScope(actorScope);
+    if (sender.principalId !== actor.principal.id) return false;
+    if (sender.grants === undefined) return sender.digest === actor.digest;
+    return scopeCovers(normalizeScope({
+      principal: { id: sender.principalId },
+      grants: sender.grants,
+      digest: sender.digest,
+      ...(sender.parentDigest !== undefined ? { parentDigest: sender.parentDigest } : {}),
+    }), actor);
+  } catch {
+    return false;
+  }
 };
 
 /**
@@ -258,8 +320,30 @@ export const sessionScope = (): FabricScope | undefined => {
  * session scope unchanged; a request `{ grants }` narrows it and is refused in
  * an unscoped session (there is no principal to narrow from).
  */
-export const childScope = (request: unknown): FabricScope | undefined => {
-  const parent = sessionScope();
+export const childScope = (request: unknown): FabricScope | undefined => narrowScope(sessionScope(), request);
+
+/**
+ * @internal Scope for a launch whose parent scope was forwarded by the
+ * requesting host (durable spawns, actor turns). The forwarded scope must be
+ * canonical (digest checked) and, in a scoped process, covered by its scope;
+ * a host without its own scope relies on the single-user boundary.
+ */
+export const launchScope = (request: unknown, inherited: unknown): FabricScope | undefined => {
+  if (inherited === undefined) return childScope(request);
+  let parent: FabricScope;
+  try {
+    parent = normalizeScope(inherited);
+  } catch (error) {
+    throw new Error(`Invalid forwarded Fabric scope: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const session = sessionScope();
+  if (session && !scopeCovers(session, parent)) {
+    throw new Error("A forwarded Fabric scope must be covered by this session's scope");
+  }
+  return narrowScope(parent, request);
+};
+
+const narrowScope = (parent: FabricScope | undefined, request: unknown): FabricScope | undefined => {
   if (request === undefined) return parent;
   if (!isObject(request)) throw new TypeError("scope must be an object { grants }");
   checkKeys(request, ["grants"], "scope (only grants can be narrowed; a program never sets a principal)");

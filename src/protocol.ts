@@ -527,6 +527,20 @@ export interface FabricScope {
   digest: string;
   parentDigest?: string;
 }
+/**
+ * Host-stamped authority of a message's sender (actor mailbox items, mesh
+ * events). "host" is an unscoped session; "scope" carries the sender's scope,
+ * with grants when they fit. Absent on records written by older builds.
+ */
+export type FabricMessageSender =
+  | { authority: "host" }
+  | {
+      authority: "scope";
+      principalId: string;
+      digest: string;
+      grants?: FabricScopeGrant[];
+      parentDigest?: string;
+    };
 
 export interface FabricInvocationContext {
   cwd: string;

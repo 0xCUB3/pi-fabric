@@ -5,6 +5,7 @@ import type { FabricLogLine, AgentRunRecord, AgentUsage } from "../agents/types.
 import type { FabricCapabilityRequirement } from "../components/types.js";
 import type { FabricKernel } from "../runtime/kernel.js";
 import type { FabricParticipantResidency } from "../topology/types.js";
+import type { FabricScope } from "../protocol.js";
 
 // Pi's extension event union is closed; every member we want the actor host
 // to observe must appear in FABRIC_ACTOR_PI_HOST_EVENTS below. `project_trust`
@@ -199,6 +200,11 @@ export interface FabricActorRequest {
   requires?: readonly (string | FabricCapabilityRequirement)[];
   /** Serialized guest predicate evaluated before work and before delivery. */
   validWhile?: FabricActorValidWhileSource;
+  /**
+   * Host-only creating principal's scope (never a provider argument). Every
+   * turn launches with it and it decides which senders the actor trusts.
+   */
+  principalScope?: FabricScope;
 }
 
 export interface FabricActorInfo {
@@ -230,6 +236,8 @@ export interface FabricActorInfo {
   capabilityDigest?: string;
   missingCapabilities?: string[];
   validWhile?: FabricActorValidWhileSource;
+  /** The bound principal; absent for unscoped actors. */
+  principal?: { id: string; digest: string };
   queued: number;
   messages: number;
   createdAt: number;

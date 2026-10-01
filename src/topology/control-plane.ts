@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { FabricActorRunBinding } from "../actors/types.js";
 import { MeshStore, type MeshEvent, type MeshIdentity } from "../mesh/store.js";
+import type { FabricMessageSender } from "../protocol.js";
 
 const CONTROL_TOPIC = "fabric.control.command";
 const ACK_TOPIC = "fabric.control.ack";
@@ -25,6 +26,8 @@ export interface FabricControlCommand {
   cancelCommandId?: string;
   requestedAt: number;
   deadlineAt?: number;
+  /** The command event's host stamp, copied by the receiving owner; never read from command data. */
+  sender?: FabricMessageSender;
 }
 
 export interface FabricControlAcceptance {
@@ -80,7 +83,11 @@ const commandFromEvent = (event: MeshEvent): FabricControlCommand | undefined =>
   ) {
     return undefined;
   }
-  return data as unknown as FabricControlCommand;
+  const { sender: _forged, ...command } = data;
+  return {
+    ...(command as unknown as FabricControlCommand),
+    ...(event.sender ? { sender: event.sender } : {}),
+  };
 };
 
 interface FabricControlSeenRecord {

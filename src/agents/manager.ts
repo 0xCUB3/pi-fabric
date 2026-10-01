@@ -88,7 +88,7 @@ import {
   type FabricAgentLineage,
   type FabricWritePolicy,
 } from "./child-env.js";
-import { childScope } from "../scope.js";
+import { launchScope, normalizeScope } from "../scope.js";
 import type { FabricCompactionBudget } from "../compaction/hook.js";
 import {
   activeBudgetState,
@@ -804,7 +804,7 @@ export class AgentManager {
       throw new Error("worktreeSetup must be a shell command of at most 8192 characters");
     }
     // Fail closed before admission or budget side effects.
-    const scope = childScope(request.scope);
+    const scope = launchScope(request.scope, request.inheritedScope);
     const thinkingBounds = this.childThinkingBounds(request.thinkingBounds);
     const requiresFabricKernel = kernel === "python" || request.kernel === "typescript";
     let tools = this.#childTools(request, runnerAdapter, requiresFabricKernel);
@@ -1355,13 +1355,24 @@ export class AgentManager {
         continue;
       }
       const adapter = getAgentRunner(state.runner);
-      if (adapter?.kind !== "hosted") {
+      let refusal = adapter?.kind !== "hosted"
+        ? `Hosted runner ${state.runner} is not registered in this process; the run outcome is indeterminate`
+        : undefined;
+      // The persisted launch scope is re-validated; a damaged one never re-attaches unscoped.
+      if (!refusal && state.context.scope !== undefined) {
+        try {
+          state.context = { ...state.context, scope: normalizeScope(state.context.scope) };
+        } catch (error) {
+          refusal = `Hosted run scope is invalid (${error instanceof Error ? error.message : String(error)}); the run outcome is indeterminate`;
+        }
+      }
+      if (refusal || adapter?.kind !== "hosted") {
         const now = Date.now();
         const { currentTool: _tool, blockedOn: _blocked, sleeping: _sleeping, ...rest } = record;
         writeRecord(statusFile, {
           ...rest,
           status: "failed",
-          error: `Hosted runner ${state.runner} is not registered in this process; the run outcome is indeterminate`,
+          error: refusal!,
           outcome: "indeterminate",
           finishedAt: now,
           updatedAt: now,

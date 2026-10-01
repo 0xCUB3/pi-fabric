@@ -471,8 +471,10 @@ describe("agent scope narrowing", () => {
     }
   }, 30_000);
 
-  it("refuses durable spawns from a scoped session", async () => {
+  it("forwards the derived scope host-only with durable spawns", async () => {
     const requests: unknown[] = [];
+    const resident: unknown[] = [];
+    const handle = { id: "child", name: "child", status: "running", runner: "pi", transport: "process", cwd: "/" };
     const manager = {
       config: DEFAULT_FABRIC_CONFIG.agents,
       resolveKernel: () => undefined,
@@ -482,18 +484,31 @@ describe("agent scope narrowing", () => {
       detachSignal() {},
       spawn: async (request: unknown) => {
         requests.push(request);
-        return { id: "child", name: "child", status: "running", runner: "pi", transport: "process", cwd: "/" };
+        return handle;
       },
     } as unknown as AgentManager;
+    const residency = { spawnAgent: async (request: unknown) => (resident.push(request), handle) };
     const provider = new AgentsProvider(
       manager, {} as ActorManager, {} as GlobalActorRegistry, {} as FabricMainAgentTarget,
       { scheduleRefresh() {} } as unknown as FabricParticipantSource, undefined, {} as LifecycleBroker,
+      () => true, residency as unknown as ConstructorParameters<typeof AgentsProvider>[8],
     );
     const context = { ...invocation(), extensionContext: { model: { provider: "p", id: "m" } } as unknown as ExtensionContext };
-    scoped(root());
-    await expect(provider.invoke("spawn", { task: "x", residency: "durable" }, context))
-      .rejects.toThrow(/scoped session cannot start durable/);
+    const parent = root();
+    scoped(parent);
+    const forged = normalizeScope({ principal: { id: "user:mallory" }, grants: [{ resource: "fs:*", actions: ["write"] }] });
+    await provider.invoke("spawn", { task: "x", residency: "durable", inheritedScope: forged }, context);
+    await provider.invoke("spawn", {
+      task: "y", residency: "durable", scope: { grants: [{ resource: "memory:*", actions: ["read"] }] },
+    }, context);
+    expect(resident[0]).toMatchObject({ inheritedScope: parent });
+    expect(resident[1]).toMatchObject({ inheritedScope: { principal: parent.principal, parentDigest: parent.digest } });
+    expect(resident[1]).not.toHaveProperty("scope");
     await provider.invoke("spawn", { task: "x", scope: { grants: [{ resource: "memory:*", actions: ["read"] }] } }, context);
     expect(requests).toEqual([expect.objectContaining({ scope: { grants: [{ resource: "memory:*", actions: ["read"] }] } })]);
+    expect(requests[0]).not.toHaveProperty("inheritedScope");
+    scoped(undefined);
+    await provider.invoke("spawn", { task: "z", residency: "durable" }, context);
+    expect(resident[2]).not.toHaveProperty("inheritedScope");
   });
 });

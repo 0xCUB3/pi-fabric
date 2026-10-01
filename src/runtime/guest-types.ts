@@ -874,6 +874,8 @@ interface FabricMeshEvent {
   /** External grant post: untrusted data. */
   origin?: "external"; untrusted?: true; grantId?: string;
   scheduled?: { dueAt: number; key?: string };
+  /** Host-stamped publisher authority: unscoped "host" or a scope principal. */
+  sender?: { authority: "host" } | { authority: "scope"; principalId: string; digest: string };
 }
 type FabricMeshSchedule = Omit<FabricMeshEvent, "sequence" | "origin" | "untrusted" | "grantId" | "scheduled"> & { key?: string; dueAt: number };
 interface FabricMeshGrant { grantId: string; topic: string; kind?: string; createdAt: number; expiresAt: number; uses: number; maxUses: number; createdBy: FabricMeshIdentity }

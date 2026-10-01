@@ -56,7 +56,7 @@ import {
 import { checkedHandoffCompaction } from "../agents/handoff.js";
 import { checkedSeed, completedBranchPrefix, snippetTask } from "../agents/fork-seed.js";
 import { readAgentLineage } from "../agents/child-env.js";
-import { sessionScope } from "../scope.js";
+import { childScope, sessionScope } from "../scope.js";
 import { withInheritedSessionPins } from "../agents/session-pins.js";
 import type {
   AgentHandleInfo,
@@ -632,9 +632,14 @@ export class AgentsProvider implements FabricProvider {
         );
         if (request.residency === "durable") this.#assertUnconfinedDurable();
         const kernel = this.manager.resolveKernel(request);
-        const { kernel: _requestedKernel, ...baseRequest } = request;
+        const { kernel: _requestedKernel, ...requestWithScope } = request;
+        // The resident host has no session scope: send the derived scope in full.
+        const inheritedScope = request.residency === "durable" ? childScope(request.scope) : undefined;
+        const { scope: _narrowing, ...unscopedRequest } = requestWithScope;
+        const baseRequest = request.residency === "durable" ? unscopedRequest : requestWithScope;
         const durableRequest = withInheritedSessionPins({
           ...baseRequest,
+          ...(inheritedScope ? { inheritedScope } : {}),
           ...(kernel ? { kernel, pythonRuntime: this.manager.resolvePythonRuntime() } : {}),
           extensions: request.extensions ?? this.manager.config.extensions,
           ...(request.residency === "durable" && request.cwd !== undefined
@@ -1220,12 +1225,15 @@ export class AgentsProvider implements FabricProvider {
     // Also freeze imported templates before any resident host sees the request.
     const extensions = request.extensions ?? true;
     const kernel = this.manager.resolveKernel({ ...request, extensions });
-    const { kernel: _requestedKernel, ...baseRequest } = request;
+    const { kernel: _requestedKernel, principalScope: _forged, ...baseRequest } = request;
+    // Bind the actor to the creating principal; the resident host has no scope of its own.
+    const principalScope = sessionScope();
     request = {
       ...baseRequest,
       runner: request.runner ?? this.manager.config.runner,
       extensions,
       ...(kernel ? { kernel, pythonRuntime: this.manager.resolvePythonRuntime(request.pythonRuntime) } : {}),
+      ...(principalScope ? { principalScope } : {}),
     };
     if (request.residency !== "durable") return this.actorManager.create(request);
     this.#assertUnconfinedDurable();
@@ -1243,12 +1251,12 @@ export class AgentsProvider implements FabricProvider {
     return actor;
   }
 
-  // The shared resident host cannot inherit this process's write confinement or scope.
+  // The shared resident host cannot inherit this process's write confinement;
+  // scope travels with the request (inheritedScope, principalScope) instead.
   #assertUnconfinedDurable(): void {
     if (process.env.PI_FABRIC_WRITE_POLICY) {
       throw new Error("A write-confined agent cannot start durable agents or actors");
     }
-    if (sessionScope()) throw new Error("A scoped session cannot start durable agents or actors");
   }
 
   /** seed: "branch" forks the caller's completed turns; "snippet" prefixes recent text. */

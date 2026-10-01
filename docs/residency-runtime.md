@@ -43,6 +43,16 @@ stdin EOF. `pi-entry.js` starts `ResidentHost` on `session_start`, aborts it on
 The residency protocol is unchanged: `config.json`, `owner.json`, request,
 response, and mesh files remain the durable interface.
 
+Scope travels with each request. The host has no session scope of its own, so
+a scoped session puts the full derived scope in a durable spawn
+(`inheritedScope`) or actor create (`principalScope`). The host checks the
+digest and refuses a malformed scope. It records the scope in the agent's
+`agents/<id>.json` and in the actor registry, and launches every child and
+actor turn with it. Hosted-run recovery checks the persisted scope again.
+Requests are files writable by the same OS user, so this keeps the
+single-user boundary of the mesh; see
+[principal and scope](providers.md#principal-and-scope).
+
 ## Context and lifecycle
 
 Residency does not share agent contexts. Each actor or agent retains its own

@@ -10,6 +10,7 @@ import type { FabricMainAgentDeliveryRequest, FabricMainAgentTarget } from "../s
 import { MeshStore, type MeshIdentity } from "../src/mesh/store.js";
 import { ResidencyClient } from "../src/residency/client.js";
 import { registerAgentRunner } from "../src/runners.js";
+import { normalizeScope, type FabricScope } from "../src/scope.js";
 import { ResidentActorClient } from "../src/residency/actor-client.js";
 import {
   RESIDENT_HOST_FORMAT,
@@ -827,6 +828,33 @@ describe.skipIf(!hasResidentHost || process.platform === "win32")("durable parti
 
     await client.cleanupAgent(first.id);
     await client.cleanupAgent(second.id);
+    await client.close();
+    await state.participants.close();
+  });
+
+  it("launches durable agents with the forwarded scope and records it", { timeout: 45_000 }, async () => {
+    const state = await rootHarness("resident-scope");
+    const client = new ResidencyClient({
+      config: state.config,
+      mesh: state.mesh,
+      participants: state.participants,
+      mainAgent: state.mainAgent,
+      hostPath,
+    });
+    const scope = normalizeScope({ principal: { id: "user:alice" }, grants: [{ resource: "fs:/repo/**", actions: ["read"] }] });
+    const handle = await client.spawnAgent({
+      task: "Scoped durable agent", transport: "process", residency: "durable", inheritedScope: scope,
+    });
+    const metadata = JSON.parse(fs.readFileSync(
+      path.join(state.config.residencyRoot, "agents", `${handle.id}.json`), "utf8",
+    )) as { scope?: FabricScope };
+    expect(metadata.scope).toEqual(JSON.parse(JSON.stringify(scope)));
+    await expect(client.spawnAgent({
+      task: "Forged", transport: "process", residency: "durable",
+      inheritedScope: { ...scope, grants: [{ resource: "fs:*", actions: ["write"] }] },
+    })).rejects.toThrow(/Invalid forwarded Fabric scope/);
+    await client.waitAgent(handle.id);
+    await client.cleanupAgent(handle.id);
     await client.close();
     await state.participants.close();
   });

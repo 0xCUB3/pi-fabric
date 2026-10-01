@@ -23,6 +23,7 @@ import {
 import { ActorDirectory } from "../actors/directory.js";
 import type { FabricActorInfo } from "../actors/types.js";
 import { AgentManager } from "../agents/manager.js";
+import { launchScope } from "../scope.js";
 import { useBudgetLedger } from "../agents/budget-ledger.js";
 import { LifecycleBroker } from "../lifecycle/broker.js";
 import { lifecycleSourceIdentity, type FabricLifecycleEvent, type FabricLifecycleSubscription } from "../lifecycle/types.js";
@@ -484,7 +485,7 @@ class ResidentHost {
           message,
           command.data,
           signal,
-          command.binding !== undefined ? { binding: command.binding } : {},
+          { ...(command.binding !== undefined ? { binding: command.binding } : {}), sender: command.sender ?? null },
         );
         return { accepted: true, messageId: result.id, result };
       } catch (error) {
@@ -510,7 +511,7 @@ class ResidentHost {
         command.targetId,
         message,
         command.data,
-        command.binding !== undefined ? { binding: command.binding } : {},
+        { ...(command.binding !== undefined ? { binding: command.binding } : {}), sender: command.sender ?? null },
       );
       return { accepted: true, messageId: result.messageId };
     } catch (error) {
@@ -711,6 +712,8 @@ class ResidentHost {
         }
         if (command.runnerModule) await loadRunnerModule(command.runnerModule);
         const handle = await this.agents.spawn({ ...command.request, residency: "durable" });
+        // spawn already validated the forwarded scope; record what the child received.
+        const scope = launchScope(command.request.scope, command.request.inheritedScope);
         const runDirectory = this.agents.runDirectory(handle.id);
         if (!runDirectory) throw new Error(`Resident agent ${handle.id} has no run directory`);
         const worktreeGitRoot = this.agents.worktreeGitRoot(handle.id);
@@ -722,6 +725,7 @@ class ResidentHost {
           handle: { ...handle, residency: "durable" },
           ...(worktreeGitRoot ? { worktreeGitRoot } : {}),
           ...(command.runnerModule ? { runnerModule: command.runnerModule } : {}),
+          ...(scope ? { scope } : {}),
           createdAt: Date.now(),
           updatedAt: Date.now(),
         };

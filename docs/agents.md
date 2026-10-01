@@ -446,7 +446,7 @@ Confinement is inherited and only narrows. A confined agent's own children inher
 
 ### Scope narrowing
 
-In a session with a host-issued [principal and scope](providers.md#principal-and-scope), every child inherits that scope. `agents.run()` and `agents.spawn()` accept `scope: { grants: [{ resource, actions }] }` to narrow it: each grant must be covered by one parent grant, or the launch fails before admission. The principal always stays the parent's. An unscoped session refuses `scope`, and a scoped session cannot start durable agents or actors.
+In a session with a host-issued [principal and scope](providers.md#principal-and-scope), every child inherits that scope. `agents.run()` and `agents.spawn()` accept `scope: { grants: [{ resource, actions }] }` to narrow it: each grant must be covered by one parent grant, or the launch fails before admission. The principal always stays the parent's. An unscoped session refuses `scope`. Durable spawns and actors keep the scope: the session sends it to the resident host with the request, so the durable child launches with the same scope it would get locally.
 
 ```ts
 await agents.run({ task: "Summarize build logs", scope: { grants: [{ resource: "mesh:jobs/build", actions: ["read"] }] } });
@@ -565,6 +565,8 @@ return agents.create({
 ```
 
 Claude actors can keep context and use mapped Claude Code tools to inspect or edit. They consume host events and mesh messages that Fabric delivers, then return text or directives. They cannot directly call `fabric_exec`, `agents.*`, or `mesh.*`. Use a Pi actor when the actor must coordinate recursively through Fabric.
+
+In a scoped session, every actor is bound to the principal that created it. Actor info reports `principal: { id, digest }`, and every turn, durable ones included, launches with that scope. Fabric delivers a message whose sender does not cover the actor's scope as untrusted data from a different or narrower principal, so a narrower session cannot borrow the actor's authority. An unscoped actor treats any scoped sender this way. See [principal and scope](providers.md#principal-and-scope) for the trust table.
 
 ### Shared actors and session bindings
 
@@ -797,6 +799,8 @@ return { event, claimed };
 ```
 
 Topics provide durable channels and direct messages with sequence cursors. `mesh.members({ scope?, kinds? })` returns the same combined directory of roots, agents, and actors as `agents.members()`. Versioned `get`, `put`, and `delete` operations provide compare-and-swap state for task claims, leases, reservations, and decisions. You can combine these operations with persistent actors to implement messenger-style swarms in Fabric code. Messenger-style swarms need no fixed planner and worker roles or user-managed daemon. When guest code requests durable residency, Fabric starts the hidden resident host described earlier. See [`/skill:fabric-swarm`](../skillsets/typescript/fabric-swarm/SKILL.md) for the pattern and [`references/mesh.md`](../skillsets/typescript/fabric-exec/references/mesh.md) for the complete API.
+
+Each event carries a host-set `sender` with the publishing session's authority: `{ authority: "host" }` when unscoped, or its principal and scope digest. A scheduled event keeps the stamp from scheduling time. Events from older builds and grant posts have none. Actors use the stamp for the [principal trust rule](providers.md#principal-and-scope).
 
 A headless resident host can also be woken by time and by an outside process. Both primitives are small: recurrence, retries and routing stay in actor code.
 

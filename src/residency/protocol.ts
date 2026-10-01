@@ -9,6 +9,7 @@ import type { AgentHandleInfo, AgentRunRequest, FabricRunOutcome } from "../agen
 import type { FabricKernel } from "../runtime/kernel.js";
 import type { MeshIdentity } from "../mesh/store.js";
 import type { OwnerHeartbeatFields } from "../core/atomic-write.js";
+import type { FabricScope } from "../protocol.js";
 export const sleepUnlessAborted = (ms: number, signal?: AbortSignal): Promise<void> =>
   // Executor form: the configured lib is ES2022, which has no
   // Promise.withResolvers, and an abort listener plus a timer need shared
@@ -184,6 +185,8 @@ export interface ResidentAgentMetadata {
   worktreeGitRoot?: string;
   /** Imported again by a restarted host before it re-attaches hosted runs. */
   runnerModule?: string;
+  /** The scope the durable child launched with (forwarded by the requesting session). */
+  scope?: FabricScope;
   /** Main consumed this terminal result; suppress queued delivery across reconnects. */
   completionConsumedAt?: number;
   createdAt: number;

@@ -5,7 +5,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { FabricAgentRunner, FabricAgentTransport, FabricPythonRuntime } from "../config.js";
 import type { FabricKernel } from "../runtime/kernel.js";
-import type { FabricScopeGrant } from "../protocol.js";
+import type { FabricScope, FabricScopeGrant } from "../protocol.js";
 import type { ThinkingTransferInput } from "./thinking-transfer.js";
 import type { FabricThinking, FabricThinkingBounds } from "../thinking.js";
 import type { FabricParticipantResidency } from "../topology/types.js";
@@ -83,6 +83,11 @@ export interface AgentRunRequest {
   shell?: "deny" | "unconfined";
   /** Narrow the host-issued scope for the child; omitted inherits it unchanged. See src/scope.ts. */
   scope?: { grants: FabricScopeGrant[] };
+  /**
+   * Host-only full parent scope forwarded to a host without this session's
+   * scope (resident host, actor turns); never a provider argument.
+   */
+  inheritedScope?: FabricScope;
   residency?: FabricParticipantResidency;
   schema?: Record<string, unknown>;
   systemPrompt?: string;
