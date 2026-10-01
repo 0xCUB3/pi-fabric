@@ -188,6 +188,23 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
   const codePreviewSettings = defaultCodePreviewSettings();
   const decorateShell: FabricToolShellDecorator = withCodePreviewShell;
   let compatibilityWarningShown = false;
+  // Host scope issuance is read once here; its parser loads only when present (src/scope.ts).
+  const scopeEnv = { json: process.env.PI_FABRIC_SCOPE, file: process.env.PI_FABRIC_SCOPE_FILE };
+  const sealScope = async (): Promise<void> => {
+    const issued = ((globalThis as Record<symbol, { sealed?: boolean; error?: string } | undefined>)[
+      Symbol.for("pi-fabric:scope:v1")] ??= {});
+    if (issued.sealed) return;
+    if (!scopeEnv.json && !scopeEnv.file) {
+      issued.sealed = true;
+      return;
+    }
+    try {
+      (await import("./scope.js")).sealRootScope(scopeEnv);
+    } catch (error) {
+      issued.sealed = true;
+      issued.error ??= error instanceof Error ? error.message : String(error);
+    }
+  };
   configureHighlighting(
     codePreviewSettings.shikiTheme,
     codePreviewSettings.syntaxHighlighting,
@@ -600,6 +617,7 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
   };
 
   pi.on("session_start", async (_event, context) => {
+    await sealScope();
     clearEntropyRetry();
     entropyStopping = false;
     entropyLifecycleEpoch += 1;

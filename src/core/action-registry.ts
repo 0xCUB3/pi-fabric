@@ -44,6 +44,7 @@ import {
   type FabricNamedActionTypeSource,
   type FabricProvider,
   type FabricProviderListRequest,
+  type FabricScope,
   type FabricScopedProviderResult,
 } from "../protocol.js";
 import {
@@ -163,6 +164,8 @@ export interface FabricRegistryInvocationContext extends FabricInvocationContext
 export const NESTED_TOOL_CALL_ID_PREFIX = FABRIC_NESTED_TOOL_CALL_ID_PREFIX;
 
 const providerNamePattern = /^[a-z][a-z0-9_-]*$/;
+/** Process-wide issuance record owned by src/scope.ts. */
+const SCOPE_HOLDER = Symbol.for("pi-fabric:scope:v1");
 
 /** structuredClone detaches ordinary nested references, but deliberately shares
  * SharedArrayBuffer backing memory. Such payloads cannot be approved as stable
@@ -1020,7 +1023,7 @@ export class ActionRegistry {
       try {
       if (this.#speculation && action.risk === "read" && effect.kind === "none") {
         const served = await runAbortable(context.signal, () =>
-          this.#speculation!.tryServe(context.parentToolCallId, ref, snapshotArguments(catalog.args), JSON.stringify([binding.id, authority.descriptor, context.capabilityView?.id ?? null])));
+          this.#speculation!.tryServe(context.parentToolCallId, ref, snapshotArguments(catalog.args), JSON.stringify([binding.id, authority.descriptor, context.capabilityView?.id ?? null, context.scope?.digest ?? null])));
         if (served.hit) {
           providerValue = await runAbortable(context.signal, () => this.#runPlanned(binding, providerActionName, authority, "replay", catalog.args, context, served.value));
           servedFromSpeculation = true;
@@ -1235,7 +1238,7 @@ export class ActionRegistry {
       }));
       return {
         get preparedArgs() { return snapshotArguments(repairedArgs); },
-        bindingToken: JSON.stringify([binding.id, authority.descriptor, context.capabilityView?.id ?? null]),
+        bindingToken: JSON.stringify([binding.id, authority.descriptor, context.capabilityView?.id ?? null, context.scope?.digest ?? null]),
         execute: async signal => {
           const combined = AbortSignal.any([context.signal!, ...(signal ? [signal] : [])]);
           const actual = execute(combined);
@@ -1522,7 +1525,13 @@ export class ActionRegistry {
     const view = context.capabilityView ? this.#requireView(context.capabilityView) : undefined;
     throwIfAborted(context.signal);
     if (this.#shutdown.signal.aborted) throw new FabricResolutionError("Fabric registry is closed");
-    return { ...context, signal: AbortSignal.any([this.#shutdown.signal, ...(context.signal ? [context.signal] : []), ...(view ? [view] : [])]) };
+    // Host-issued scope (src/scope.ts) replaces any caller value; failed issuance refuses every call.
+    const issued = (globalThis as Record<symbol, { scope?: FabricScope; error?: string } | undefined>)[SCOPE_HOLDER];
+    if (issued?.error) throw new FabricResolutionError(`Fabric scope issuance failed; provider calls are refused: ${issued.error}`);
+    const scoped = { ...context, signal: AbortSignal.any([this.#shutdown.signal, ...(context.signal ? [context.signal] : []), ...(view ? [view] : [])]) };
+    if (issued?.scope) scoped.scope = issued.scope;
+    else delete scoped.scope;
+    return scoped;
   }
 
   #bindingContext<T extends FabricInvocationContext>(binding: FabricProviderBinding, context: T): T {

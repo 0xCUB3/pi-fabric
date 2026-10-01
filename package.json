@@ -36,6 +36,10 @@
     "./memory": {
       "types": "./dist/memory.d.ts",
       "import": "./dist/memory.js"
+    },
+    "./scope": {
+      "types": "./dist/scope.d.ts",
+      "import": "./dist/scope.js"
     }
   },
   "files": [

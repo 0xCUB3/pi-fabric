@@ -52,9 +52,11 @@ A source implements interface version `1`, has an opaque stable `id`, and
 provides `listSessions({ limit, signal? })` and
 `loadSession(sessionKey, { signal? })`. Session descriptors have an opaque
 `sessionKey` and content-sensitive `revision`; snapshots add standard Pi
-`records`. Optional `authorize(action, sessionKey)` is rechecked around
-asynchronous reads. Bind principals and permissions in the host, never in
-model-supplied arguments. The host also owns sanitization and retention.
+`records`. Optional `authorize(action, sessionKey, scope?)` is rechecked around
+asynchronous reads. In a scoped session, `scope` is the caller's host-issued
+[principal and grants](providers.md#principal-and-scope), so a source can refuse
+before content enters context; client calls accept `{ scope }` too. Bind principals
+and permissions in the host, never in model-supplied arguments. The host also owns sanitization and retention.
 
 Lists may return a descriptor array or `{ sessions, coverage }`; snapshots
 also support `coverage: { complete: false, reason }`. Report every partial

@@ -73,6 +73,7 @@ import {
   type FabricAgentLineage,
   type FabricWritePolicy,
 } from "./child-env.js";
+import { childScope } from "../scope.js";
 import type { FabricCompactionBudget } from "../compaction/hook.js";
 import {
   activeBudgetState,
@@ -770,6 +771,7 @@ export class AgentManager {
       throw new Error("worktreeSetup must be a shell command of at most 8192 characters");
     }
     // Fail closed before admission or budget side effects.
+    const scope = childScope(request.scope);
     const thinkingBounds = this.childThinkingBounds(request.thinkingBounds);
     const requiresFabricKernel = kernel === "python" || request.kernel === "typescript";
     const tools = this.#childTools(request, runner, requiresFabricKernel);
@@ -1005,6 +1007,7 @@ export class AgentManager {
         ...(branch ? ["--branch", branch] : []),
         ...(worktree ? ["--worktree", worktree] : []),
         ...(writePolicy ? ["--write-policy", JSON.stringify(writePolicy)] : []),
+        ...(scope ? ["--scope", JSON.stringify(scope)] : []),
         "--lineage",
         JSON.stringify(lineage),
       ];

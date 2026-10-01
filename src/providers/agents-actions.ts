@@ -77,6 +77,27 @@ const runProperties = {
     maxItems: 32,
     description: "Pi only: confine write/edit to these directories (relative to the child cwd; default the cwd). Shell is refused unless shell: \"unconfined\".",
   },
+  scope: {
+    type: "object",
+    properties: {
+      grants: {
+        type: "array",
+        maxItems: 64,
+        items: {
+          type: "object",
+          properties: {
+            resource: { type: "string", minLength: 3, maxLength: 512 },
+            actions: { type: "array", minItems: 1, maxItems: 3, items: { type: "string", enum: ["read", "write", "execute"] } },
+          },
+          required: ["resource", "actions"],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ["grants"],
+    additionalProperties: false,
+    description: "Narrow this session's host-issued scope for the child (each grant must be covered by a parent grant; resource <ns>:<path>, <ns>:<path>/*, <ns>:<path>/**, <ns>:*). Omit to inherit it; refused in an unscoped session.",
+  },
   shell: {
     type: "string",
     enum: ["deny", "unconfined"],

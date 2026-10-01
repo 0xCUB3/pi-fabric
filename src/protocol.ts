@@ -58,6 +58,23 @@ export interface FabricWorkflowItemEventV1 {
   meta?: Record<string, unknown>;
 }
 
+/** Host-local request: run a saved program without the model, like `/fabric run`. */
+export const FABRIC_PROGRAM_RUN_EVENT = "pi-fabric:program:run:v1";
+
+export type FabricProgramRunReplyV1 =
+  | { ok: true; program: string; value: unknown; logs: string[] }
+  | { ok: false; error: string; program?: string };
+
+export interface FabricProgramRunRequestV1 {
+  /** name, name@<digest prefix >= 12>, or a full digest. */
+  ref: string;
+  input?: unknown;
+  requirePromoted?: boolean;
+  signal?: AbortSignal;
+  /** Called exactly once. */
+  reply: (result: FabricProgramRunReplyV1) => void;
+}
+
 export const FABRIC_PROVIDER_REGISTER_EVENT = "pi-fabric:provider:register:v1";
 export const FABRIC_PROVIDER_DISCOVER_EVENT = "pi-fabric:provider:discover:v1";
 export const FABRIC_PROVIDER_WITHDRAW_EVENT = "pi-fabric:provider:withdraw:v1";
@@ -494,6 +511,23 @@ export interface FabricInvocationParticipants {
   register(spec: FabricParticipantSpec): FabricParticipantHandle;
 }
 
+/** Host-issued principal and grants (`pi-fabric/scope`); trusted host code, not a verified kernel. */
+export type FabricScopeAction = "read" | "write" | "execute";
+export interface FabricScopeGrant {
+  /** `<ns>:<path>`, `<ns>:<path>/*` (one level), `<ns>:<path>/**` (any depth) or `<ns>:*`. */
+  resource: string;
+  actions: FabricScopeAction[];
+}
+export interface FabricScope {
+  version: 1;
+  principal: { id: string; issuer: "host" };
+  /** At most 64, merged per resource and sorted. */
+  grants: FabricScopeGrant[];
+  /** sha256 hex of canonical JSON { grants, parentDigest?, principal }. */
+  digest: string;
+  parentDigest?: string;
+}
+
 export interface FabricInvocationContext {
   cwd: string;
   signal: AbortSignal | undefined;
@@ -522,6 +556,8 @@ export interface FabricInvocationContext {
   // never projected into the durable execution trace.
   attachPreview?(preview: unknown): void;
   capabilityView?: FabricCommittedCapabilityView;
+  /** Frozen host-issued scope; set by the registry only, absent when unscoped. */
+  scope?: Readonly<FabricScope>;
   /** Advisory for ordinary calls; strict components reject concurrent conflicting effects. */
   effectPolicy?: "advisory" | "strict";
 }

@@ -14,6 +14,7 @@ const stable = [
   "agents.js",
   "jev.js",
   "protocol.js",
+  "scope.js",
   "core/provider-operations.js",
   "worker.js",
   "residency/host.js",

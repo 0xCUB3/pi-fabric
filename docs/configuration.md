@@ -649,6 +649,15 @@ Each entry has three keys:
 
 The `fs` adapter derives each session's `revision` from the SHA-256 of the file bytes, so mtime-only touches keep follow pointers valid while content changes invalidate them. Enumeration is bounded by `memory.maxSessions` and reported through coverage reasons (`fs_source_max_sessions`, `fs_source_scan_capped`); a capped archive is never presented as complete. Ranking, branches, and expansion follow the normal engine paths described in [memory recall](memory-recall.md#portable-host-sources).
 
+## Principal and scope
+
+Scope is host-issued and has no config key. A project or global setting cannot grant or widen a principal.
+
+- `PI_FABRIC_SCOPE`: JSON `{ version?: 1, principal: { id, issuer?: "host" }, grants: [{ resource, actions }], digest?, parentDigest? }`. At most 64 grants; `actions` from `read`, `write`, `execute`.
+- `PI_FABRIC_SCOPE_FILE`: path to the same JSON, at most 64 KiB. Set only one of the two.
+
+Fabric reads both once when the extension initializes. An embedding process can call `issueRootScope()` from `pi-fabric/scope` before `session_start`. Malformed JSON, an unreadable file, a digest mismatch, or conflicting issuance makes every provider call fail with a clear error. Fabric never falls back to an unscoped session. Fabric children receive their derived scope through `PI_FABRIC_SCOPE`. See [principal and scope](providers.md#principal-and-scope).
+
 ## Compaction
 
 The deterministic, LLM-free compaction engine is on by default. It keeps Pi's bounded `keepRecentTokens` continuity tail. `compaction.targetContextRatio` sets a hard occupancy ceiling. Set `compaction.engine` to `"pi"` to restore pi-core compaction. When pi-vcc is also installed, Fabric takes precedence for automatic compaction. An explicit `/pi-vcc` command always uses pi-vcc's engine. See [compaction](compaction.md) for invariants, loss guarantees, sections, and limits.

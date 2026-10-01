@@ -5,6 +5,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { FabricAgentRunner, FabricAgentTransport, FabricPythonRuntime } from "../config.js";
 import type { FabricKernel } from "../runtime/kernel.js";
+import type { FabricScopeGrant } from "../protocol.js";
 import type { ThinkingTransferInput } from "./thinking-transfer.js";
 import type { FabricThinking, FabricThinkingBounds } from "../thinking.js";
 import type { FabricParticipantResidency } from "../topology/types.js";
@@ -70,6 +71,8 @@ export interface AgentRunRequest {
   readOnly?: boolean;
   writableRoots?: string[];
   shell?: "deny" | "unconfined";
+  /** Narrow the host-issued scope for the child; omitted inherits it unchanged. See src/scope.ts. */
+  scope?: { grants: FabricScopeGrant[] };
   residency?: FabricParticipantResidency;
   schema?: Record<string, unknown>;
   systemPrompt?: string;
@@ -268,6 +271,8 @@ export interface AgentWorkerOptions {
   writePolicy?: string;
   /** Serialized PI_FABRIC_LINEAGE. */
   lineage?: string;
+  /** Serialized PI_FABRIC_SCOPE; absent clears any inherited scope variables. */
+  scope?: string;
 }
 
 /**

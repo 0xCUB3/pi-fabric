@@ -369,6 +369,14 @@ The child Pi process enforces the policy. The worker passes it as `PI_FABRIC_WRI
 
 Confinement is inherited and only narrows. A confined agent's own children inherit its policy when they request none; an explicit request must keep `readOnly`, cannot switch to `shell: "unconfined"`, and must name roots inside the caller's roots. Claude and Veda runners fail before launch under any policy because Fabric cannot enforce it there. A confined agent cannot start durable agents or actors, since the shared resident host does not inherit its confinement.
 
+### Scope narrowing
+
+In a session with a host-issued [principal and scope](providers.md#principal-and-scope), every child inherits that scope. `agents.run()` and `agents.spawn()` accept `scope: { grants: [{ resource, actions }] }` to narrow it: each grant must be covered by one parent grant, or the launch fails before admission. The principal always stays the parent's. An unscoped session refuses `scope`, and a scoped session cannot start durable agents or actors.
+
+```ts
+await agents.run({ task: "Summarize build logs", scope: { grants: [{ resource: "mesh:jobs/build", actions: ["read"] }] } });
+```
+
 ### Child environment contract
 
 Fabric children may read these environment variables. They are stable and versioned where noted; every other `PI_FABRIC_*` variable is internal and may change.
@@ -378,6 +386,7 @@ Fabric children may read these environment variables. They are stable and versio
 | `PI_FABRIC_LINEAGE` | JSON `{ version: 1, rootSessionId, parentSessionId?, parentRunId?, runId, depth, childIndex, worker: true }`. `childIndex` is the launch ordinal within the parent process. `agents.self()` adds the same object as `lineage` inside a child. |
 | `PI_FABRIC_WRITE_POLICY` | JSON `{ readOnly, writableRoots, shell }` with canonical absolute roots. Present only for confined children. Malformed values fail closed to read-only with shell denied. |
 | `PI_FABRIC_THINKING_BOUNDS` | JSON `{ min?, max? }` thinking bounds; see [thinking](thinking.md). |
+| `PI_FABRIC_SCOPE` | JSON `FabricScope` `{ version: 1, principal, grants, digest, parentDigest? }`. Present only when the parent is scoped: the inherited or narrowed scope. The worker always clears `PI_FABRIC_SCOPE_FILE`. A child Fabric reads it as its root scope and fails closed when it is malformed. See [principal and scope](providers.md#principal-and-scope). |
 | `PI_FABRIC_DEPTH` | Recursion depth of the child (the root is 0). |
 | `PI_FABRIC_AGENT_NAME` | The child's display name. |
 

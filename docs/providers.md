@@ -191,6 +191,46 @@ The host remains responsible for OS isolation, resource loading, broker authoriz
 cancellation, and for exposing only trusted extension code. This option does not sandbox arbitrary
 host-side extensions. In particular, do not auto-load plugins from the agent's computer snapshot.
 
+## Principal and scope
+
+A host can attach a principal and resource grants to a Fabric session. Fabric propagates them and narrows them for children. Providers and adapters enforce them. A program can never set or widen a principal.
+
+```ts
+type FabricScope = {
+  version: 1;
+  principal: { id: string; issuer: "host" };
+  grants: { resource: string; actions: ("read" | "write" | "execute")[] }[];
+  digest: string;        // sha256 hex of canonical JSON { grants, parentDigest?, principal }
+  parentDigest?: string; // set on derived scopes
+};
+```
+
+A resource is `<ns>:<path>`. The namespace matches `[a-z][a-z0-9._-]*`. The path is `/`-separated segments with an optional leading `/`. A final `/*` matches exactly one more segment, and a final `/**` matches one or more. `<ns>:*` matches everything in the namespace. Neither wildcard matches its own prefix, so `fs:/repo/**` does not cover `fs:/repo`. A scope holds at most 64 grants. Fabric merges grants per resource, sorts them, and orders actions as read, write, execute before hashing, so equal content always has the same digest. A supplied `digest` must match.
+
+Issue the root scope in one of two ways, before the session starts:
+
+- Set `PI_FABRIC_SCOPE` (JSON) or `PI_FABRIC_SCOPE_FILE` (a path to the JSON, at most 64 KiB). The extension reads them once at initialization.
+- Call `issueRootScope(scope)` from `pi-fabric/scope` in the embedding process before Pi emits `session_start`. A second call, or a call after `session_start`, throws.
+
+Invalid input fails closed: every registry call is refused with `Fabric scope issuance failed; provider calls are refused: <reason>`. Setting both variables, or both a variable and the API, is invalid. Without any input, the session is unscoped and nothing changes.
+
+Every registry invocation receives the frozen scope as `context.scope`. The registry sets this field itself and discards any caller value. `agents.run` and `agents.spawn` accept `scope: { grants }`. Each requested grant must be covered by one parent grant: a resource subset and an action subset. Without `scope`, the child inherits the parent scope unchanged. An unscoped session refuses `scope` arguments, because there is no principal to narrow. Children receive the result in `PI_FABRIC_SCOPE`, and the worker clears any inherited `PI_FABRIC_SCOPE_FILE`. A scoped session cannot start durable agents or actors, because the shared resident host cannot carry its scope.
+
+```ts
+import { deriveScope, issueRootScope, scopeAllows } from "pi-fabric/scope";
+
+const root = issueRootScope({
+  principal: { id: "tenant:acme/user:42" },
+  grants: [{ resource: "memory:acme/**", actions: ["read"] }],
+});
+scopeAllows(root, "memory:acme/sessions/7", "read"); // true
+deriveScope(root, [{ resource: "memory:acme/sessions/*", actions: ["read"] }]);
+```
+
+Caches that can serve a result across invocations include the scope digest in their keys: speculative replay tokens and the memory recall-continuation and expansion caches. The `cache` provider holds prompt-cache leases and caches no results. The MCP descriptor cache holds tool descriptors, not call results. [Portable memory sources](memory-recall.md) receive the scope as the third `authorize(action, sessionKey, scope)` argument, so they can filter before content enters context. `createMemorySourceClient` calls accept `{ scope }`.
+
+This layer is trusted host adapter code, not a verified kernel. Fabric guarantees issuance, propagation, narrowing and cache isolation. It does not map grants onto individual actions: a provider that ignores `context.scope` keeps its native authority. Claude and Veda children receive the variable without a Fabric registry to read it. See [provider capabilities](provider-capabilities.md#future-verified-extension).
+
 ## Effect semantics and scoped acquisition
 
 Action descriptors can declare effect semantics. Descriptor hashes and committed component and actor views carry this metadata. Omitting it is the conservative choice. Read-risk actions then resolve as commutative `none`, and every other risk resolves as unknown-order `emission`.

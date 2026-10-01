@@ -56,6 +56,7 @@ import {
 import { checkedHandoffCompaction } from "../agents/handoff.js";
 import { checkedSeed, completedBranchPrefix, snippetTask } from "../agents/fork-seed.js";
 import { readAgentLineage } from "../agents/child-env.js";
+import { sessionScope } from "../scope.js";
 import { withInheritedSessionPins } from "../agents/session-pins.js";
 import type {
   AgentHandleInfo,
@@ -1230,11 +1231,12 @@ export class AgentsProvider implements FabricProvider {
     return actor;
   }
 
-  // The shared resident host cannot inherit this process's write confinement.
+  // The shared resident host cannot inherit this process's write confinement or scope.
   #assertUnconfinedDurable(): void {
     if (process.env.PI_FABRIC_WRITE_POLICY) {
       throw new Error("A write-confined agent cannot start durable agents or actors");
     }
+    if (sessionScope()) throw new Error("A scoped session cannot start durable agents or actors");
   }
 
   /** seed: "branch" forks the caller's completed turns; "snippet" prefixes recent text. */

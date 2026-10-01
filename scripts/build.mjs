@@ -9,6 +9,8 @@ const primaryEntryPoints = [
   "src/agents.ts",
   "src/jev.ts",
   "src/assessment.ts",
+  // Public `pi-fabric/scope`; also the extension's first-use scope parser.
+  "src/scope.ts",
   "src/protocol.ts",
   "src/worker.ts",
   "src/residency/host.ts",

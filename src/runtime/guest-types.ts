@@ -80,6 +80,8 @@ interface FabricAgentRequest {
   readOnly?: boolean;
   writableRoots?: string[];
   shell?: "deny" | "unconfined";
+  /** Narrow the host-issued scope; omitted inherits it. Refused when this session is unscoped. */
+  scope?: { grants: { resource: string; actions: ("read" | "write" | "execute")[] }[] };
   schema?: Record<string, unknown>;
   prompt?: string;
   instructions?: string;
