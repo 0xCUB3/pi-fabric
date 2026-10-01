@@ -973,6 +973,8 @@ export class FabricRuntimeState {
       this.capturedTools,
       this.#managedHost ? (name) => this.#managedHost!.ownsProvider(name) : undefined,
     );
+    const events = this.pi.events;
+    if (events) this.#execution.setEventEmitter((channel, data) => events.emit(channel, data));
     const discovery: FabricProviderDiscovery = {
       version: 1,
       register: (provider, options) => this.registerExternal(provider, options),

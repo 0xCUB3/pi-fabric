@@ -15,7 +15,7 @@ Use these helpers:
 - Use `workflow.pipeline(items, ...stages)` or `pipeline(...)` to run sequential stages for each item with concurrency across items.
 - Use `workflow.configure({ name, description })` to name the activity surface.
 - Use `workflow.phase(name, { id?, description?, total? })` or `phase(...)` to define progress groups.
-- Use `workflow.item(...)` for non-agent work items that change status over time.
+- Use `workflow.item(...)` for non-agent work items that change status over time. An optional stable `id` (1–128 characters of `[A-Za-z0-9._:/-]`) keeps one item across updates; without one, each call creates `item-<n>` in invocation order. An optional `meta` plain JSON object (at most 2 KiB serialized) rides only on the host [`pi-fabric:workflow-item:v1`](providers.md#workflow-item-events) event. Invalid ids, statuses, or meta fail the call.
 - Use `workflow.event(...)` to record important milestones in the dashboard feed.
 - Use `workflow.log(...)` to add short progress notes.
 - Read `workflow.budget` for token-budget observations.

@@ -30,6 +30,34 @@ export interface FabricShellTimingV1 {
   timestamp: number;
 }
 
+/** Host-emitted on each `workflow.item` status transition; observation only. */
+export const FABRIC_WORKFLOW_ITEM_EVENT = "pi-fabric:workflow-item:v1";
+
+export type FabricWorkflowItemStatusV1 =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "blocked"
+  | "stopped";
+
+export interface FabricWorkflowItemEventV1 {
+  version: 1;
+  /** The outer `fabric_exec` tool call id that owns the item. */
+  invocationId: string;
+  sessionId?: string;
+  /** Caller-supplied stable id, or the deterministic per-invocation `item-<n>`. */
+  itemId: string;
+  label?: string;
+  /** Absent on the item's first status. */
+  from?: FabricWorkflowItemStatusV1;
+  to: FabricWorkflowItemStatusV1;
+  /** Synchronous observation time (epoch ms). */
+  at: number;
+  /** Caller-supplied plain JSON object carried by the transitioning call. */
+  meta?: Record<string, unknown>;
+}
+
 export const FABRIC_PROVIDER_REGISTER_EVENT = "pi-fabric:provider:register:v1";
 export const FABRIC_PROVIDER_DISCOVER_EVENT = "pi-fabric:provider:discover:v1";
 export const FABRIC_PROVIDER_WITHDRAW_EVENT = "pi-fabric:provider:withdraw:v1";

@@ -114,6 +114,20 @@ the same normalized progress, entity, or metrics value is a UI no-op, not a hear
 durable event. Actual lifecycle completion and failure still travel through the normal
 invocation path. See [incremental activity reads](interface.md#incremental-activity-reads).
 
+## Workflow item events
+
+Every `workflow.item` status transition emits `pi-fabric:workflow-item:v1` (`FABRIC_WORKFLOW_ITEM_EVENT`) on `pi.events`, so a host extension can track program work without parsing results:
+
+```ts
+import { FABRIC_WORKFLOW_ITEM_EVENT, type FabricWorkflowItemEventV1 } from "pi-fabric/protocol";
+
+pi.events.on(FABRIC_WORKFLOW_ITEM_EVENT, (event: FabricWorkflowItemEventV1) => {
+  // { version: 1, invocationId, sessionId?, itemId, label?, from?, to, at, meta? }
+});
+```
+
+`invocationId` is the owning `fabric_exec` tool call id. `itemId` is the caller's stable id or the deterministic per-invocation `item-<n>`. `from` is absent on an item's first status, and `meta` appears only when the transitioning call carried it. Updates that keep the same status emit nothing. When the program ends, items still `running` settle to `completed` or `failed` and emit that transition, matching the activity surface. Fabric emits synchronously from the host bridge and never waits on listeners. A throwing listener is logged and cannot fail the program. Transitions stay in the execution trace as before; `meta` never enters it.
+
 ## Managed embedded hosts
 
 Trusted embedding code can opt into a closed-world provider authority:

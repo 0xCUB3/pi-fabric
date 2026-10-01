@@ -14,6 +14,7 @@ import type {
   FabricPhaseInput,
   FabricRunDisplay,
 } from "./types.js";
+import { isWorkflowItemId } from "./workflow-items.js";
 
 const MAX_RUNS = 24;
 const MAX_CALLS = 1_000;
@@ -304,7 +305,8 @@ export class FabricActivityStore {
 
   upsertItem(runId: string, input: FabricActivityItemInput): FabricActivityItem {
     const run = this.#require(runId);
-    const id = cleanId(input.id, `item-${run.items.length + 1}`);
+    // Stable workflow item ids (validated by the execution bridge) stay verbatim.
+    const id = isWorkflowItemId(input.id) ? input.id : cleanId(input.id, `item-${run.items.length + 1}`);
     const label = cleanText(input.label, MAX_NAME_CHARS);
     if (!label) throw new Error("Workflow activity item label must not be empty");
     const now = Date.now();

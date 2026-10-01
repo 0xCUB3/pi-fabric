@@ -9,6 +9,15 @@ import {
   type FabricExecutionTraceV1,
 } from "./audit/trace.js";
 import { FabricActivityStore } from "./activity/store.js";
+import {
+  FabricWorkflowItemTransitions,
+  validateWorkflowItemInput,
+} from "./activity/workflow-items.js";
+import {
+  FabricAssessmentRecorder,
+  readFabricAssessmentUsage,
+  type FabricAssessmentTraceV1,
+} from "./audit/assessment.js";
 import type { CapturedToolCatalog } from "./capture/catalog.js";
 import { isPiShellRef, PI_CORE_TOOL_NAME_SET } from "./core/pi-tools.js";
 import { piBashExitMetadata } from "./core/pi-bash-error.js";
@@ -104,6 +113,8 @@ export interface FabricExecutionResult {
   audits: FabricCallAudit[];
   phases: string[];
   trace: FabricExecutionTraceV1;
+  /** Opt-in (`trace.assessment`) timings and usage; never part of `trace`. */
+  assessment?: FabricAssessmentTraceV1;
   elapsedMs: number;
   typeErrors?: FabricTypeError[];
   error?: string;
@@ -141,6 +152,7 @@ export class FabricExecutionService {
   #runtime: FabricKernelRuntime | undefined;
   #runtimeKind: string | undefined;
   #capabilityView: FabricCommittedCapabilityView | undefined;
+  #emitEvent: ((channel: string, data: unknown) => void) | undefined;
   constructor(
     readonly registry: ActionRegistry,
     readonly config: FabricConfig,
@@ -156,9 +168,26 @@ export class FabricExecutionService {
     this.#capabilityView = view;
   }
 
+  /** Host event bus for observation-only events such as workflow item transitions. */
+  setEventEmitter(emit: ((channel: string, data: unknown) => void) | undefined): void {
+    this.#emitEvent = emit;
+  }
+
   async execute(options: FabricExecutionOptions): Promise<FabricExecutionResult> {
     const startedAt = performance.now();
-    const traceRecorder = new FabricExecutionTraceRecorder();
+    const assessment = this.config.trace.assessment ? new FabricAssessmentRecorder() : undefined;
+    const traceRecorder = new FabricExecutionTraceRecorder(assessment);
+    let sessionId: string | undefined;
+    try {
+      sessionId = options.context.sessionManager?.getSessionId?.() || undefined;
+    } catch {
+      sessionId = undefined;
+    }
+    const itemTransitions = new FabricWorkflowItemTransitions(
+      options.parentToolCallId,
+      this.#emitEvent,
+      sessionId,
+    );
     this.activity?.start(
       options.parentToolCallId,
       options.display,
@@ -231,6 +260,11 @@ export class FabricExecutionService {
         }
       }
       this.activity?.finish(options.parentToolCallId, false, "Type checking failed");
+      const failedTrace = traceRecorder.seal(
+        "failed",
+        [],
+        `Type checking failed (${checked.errors.length} ${checked.errors.length === 1 ? "error" : "errors"})`,
+      );
       return {
         success: false,
         kernel: "typescript",
@@ -238,11 +272,8 @@ export class FabricExecutionService {
         logs: [],
         audits: [],
         phases: [],
-        trace: traceRecorder.seal(
-          "failed",
-          [],
-          `Type checking failed (${checked.errors.length} ${checked.errors.length === 1 ? "error" : "errors"})`,
-        ),
+        trace: failedTrace,
+        ...(assessment ? { assessment: assessment.seal("failed") } : {}),
         elapsedMs: performance.now() - startedAt,
         typeErrors: checked.errors,
       };
@@ -258,7 +289,15 @@ export class FabricExecutionService {
         risk: audit.risk,
       });
       operation.succeed(audit);
-      if (decision) classifierUsages.push(decision.usage);
+      if (decision) {
+        classifierUsages.push(decision.usage);
+        const usage = readFabricAssessmentUsage(decision.usage);
+        assessment?.attribute(operation.sequence, {
+          source: "classifier",
+          ...(audit.model ? { model: audit.model } : {}),
+          ...(usage ? { usage } : {}),
+        });
+      }
     };
     const approval = new ApprovalController(
       this.config.approvals,
@@ -802,9 +841,19 @@ export class FabricExecutionService {
                 "fabric.workflow.item",
                 args,
                 runtimeSignal,
-                () => {
-                  const item = args as unknown as FabricActivityItemInput;
-                  return this.activity?.upsertItem(options.parentToolCallId, item) ?? item;
+                (setStage) => {
+                  setStage("validate");
+                  // The trace projects the original args; meta stays out of it.
+                  const transition = validateWorkflowItemInput(
+                    args,
+                    () => itemTransitions.nextDefaultId(),
+                  );
+                  setStage("invoke");
+                  const { meta: _meta, ...rest } = args;
+                  const item = { ...rest, id: transition.id } as unknown as FabricActivityItemInput;
+                  const stored = this.activity?.upsertItem(options.parentToolCallId, item) ?? item;
+                  itemTransitions.record(transition, stored.label);
+                  return stored;
                 },
               );
             case "fabric.$event":
@@ -864,6 +913,7 @@ export class FabricExecutionService {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.activity?.finish(options.parentToolCallId, false, message);
+      itemTransitions.finish(false);
       throw error;
     } finally {
       await this.registry.endInvocation(options.parentToolCallId);
@@ -877,6 +927,7 @@ export class FabricExecutionService {
     const runOutcome = executionOutcomeFromTermination(sandboxResult.terminationReason);
     const succeeded = runOutcome === "succeeded";
     this.activity?.finish(options.parentToolCallId, succeeded, sandboxResult.error);
+    itemTransitions.finish(succeeded);
     // Logs, results, and error text reach the model, the event stream, and
     // persisted traces. Raw media must not: images are hoisted out of band and
     // base64 payloads collapse to a descriptor (see core/media-sanitize.ts).
@@ -892,6 +943,7 @@ export class FabricExecutionService {
       // Guest and provider error text may embed tool output or source
       // literals, so the durable trace records only safe causes.
       trace: traceRecorder.seal(runOutcome, phases),
+      ...(assessment ? { assessment: assessment.seal(runOutcome) } : {}),
       elapsedMs: performance.now() - startedAt,
       ...(sandboxResult.error ? { error: sanitizeFabricMediaText(sandboxResult.error) } : {}),
       ...(handoffRequest ? { handoffRequest } : {}),

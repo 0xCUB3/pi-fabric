@@ -204,6 +204,9 @@ where absent values do not participate. Orchestration programs (`agents.run` / `
     "sources": [
       { "id": "laptop", "kind": "fs", "root": "/home/me/pi-archive" }
     ]
+  },
+  "trace": {
+    "assessment": false
   }
 }
 ```
@@ -604,6 +607,10 @@ The `fs` adapter derives each session's `revision` from the SHA-256 of the file 
 ## Compaction
 
 The deterministic, LLM-free compaction engine is on by default. It keeps Pi's bounded `keepRecentTokens` continuity tail. `compaction.targetContextRatio` sets a hard occupancy ceiling. Set `compaction.engine` to `"pi"` to restore pi-core compaction. When pi-vcc is also installed, Fabric takes precedence for automatic compaction. An explicit `/pi-vcc` command always uses pi-vcc's engine. See [compaction](compaction.md) for invariants, loss guarantees, sections, and limits.
+
+## Execution trace
+
+`trace.assessment` (default `false`) adds a redacted `FabricAssessmentTraceV1` beside each `fabric_exec` execution trace: per-operation durations, model/Jev/classifier attribution, and token usage and cost where an operation reports them, plus program totals. It never stores arguments, results, code, or error prose, and the deterministic trace is unchanged. See [assessment projection](audit-trace.md#assessment-projection).
 
 ## Catalog repairs
 

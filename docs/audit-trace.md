@@ -10,6 +10,7 @@ The serialized final details object never exceeds 512 KiB. Consumers use current
 interface FabricPersistedExecutionDetailsV1 {
   success: boolean;
   trace: FabricExecutionTraceV1;
+  assessment?: FabricAssessmentTraceV1; // only with trace.assessment
   audits: FabricLegacyRenderAudit[];
   phases: string[];
   error?: string;
@@ -85,7 +86,7 @@ Declarative workflow calls still feed transient activity updates to the live UI.
 
 - `fabric.workflow.configure`: `name`. Drops the description
 - `fabric.workflow.phase`: `name`, identifier-shaped `id`, numeric `total`. Drops the description
-- `fabric.workflow.item`: identifier-shaped `id`, `status`, `phase`, and `kind`, plus numeric `total` and `completed`. Drops label, detail, current value, and data
+- `fabric.workflow.item`: identifier-shaped `id`, `status`, `phase`, and `kind`, plus numeric `total` and `completed`. Drops label, detail, current value, data, and `meta`. The trace records the arguments as called, so an omitted `id` stays omitted. Status transitions also go to host listeners as [`pi-fabric:workflow-item:v1`](providers.md#workflow-item-events)
 - `fabric.workflow.event`: identifier-shaped `level`. Drops message and data
 - `fabric.workflow.progress`: no arguments. Drops the message
 
@@ -100,6 +101,32 @@ Guest span IDs are deterministic execution-local bridge correlation values. Fabr
 Traces retain only plain local paths. They drop URL paths, together with credentials and query/fragment data. Plain paths lose their query/fragment suffixes as well. Sensitive-key normalization, media/base64 rejection, JSON safety, depth/node limits, and UTF-8 truncation still run after projection and add defense in depth. Projection provides the primary secrecy mechanism.
 
 Identifiers (`ref`, `provider`, `action`), outcomes, failure stage, operation sequence, and occurrence-ordered phase labels stay durable. These fields, the retained local paths and mesh addresses, and bash command text are not secret containers. Callers must never place credentials in identifiers, local filenames, topics, keys, phase names, or commands.
+
+## Assessment projection
+
+With `trace.assessment: true` (default `false`), the details envelope also carries a separate, non-deterministic `assessment`. `FabricExecutionTraceV1` stays byte-for-byte what it would be without it.
+
+```ts
+interface FabricAssessmentTraceV1 {
+  kind: "pi-fabric.assessment";
+  version: 1;
+  outcome: "succeeded" | "failed" | "aborted" | "timed_out";
+  durationMs: number; // whole program
+  operations: Array<{
+    sequence: number; // joins with the trace operation
+    ref: string;
+    outcome: "succeeded" | "failed" | "aborted" | "timed_out";
+    durationMs: number;
+    source?: "agent" | "jev" | "classifier" | "provider";
+    model?: string;
+    usage?: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number; cost?: number };
+  }>;
+  totals: { operations: number; succeeded: number; failed: number; usage: Usage };
+  counts: { droppedOperations: number };
+}
+```
+
+Usage and model come only from what an operation already reports: agent run results (`usage`, `model`, including handoff `agent`), Jev `input_tokens`/`output_tokens`, provider results that carry the same shapes, and auto-approval classifier decisions. The projection holds no arguments, results, code, or error prose. It keeps at most 1,024 operation rows and 128 KiB. Totals still count every observed operation. Inside the 512 KiB envelope, assessment rows trim after display audits and before any trace operation. `isFabricAssessmentTraceV1` and `readFabricAssessmentTraceV1` guard it.
 
 ## Reading and rendering traces
 

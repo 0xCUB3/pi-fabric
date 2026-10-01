@@ -1415,7 +1415,8 @@ interface FabricWorkflowPhaseInput extends FabricWorkflowPhaseOptions {
   name: string;
 }
 interface FabricWorkflowItem {
-  id: string;
+  /** Stable id, 1-128 chars of [A-Za-z0-9._:/-]; omitted ids become item-<n> per invocation. */
+  id?: string;
   label: string;
   status?: FabricActivityStatus;
   phase?: string;
@@ -1425,6 +1426,8 @@ interface FabricWorkflowItem {
   total?: number;
   completed?: number;
   data?: unknown;
+  /** Plain JSON object (<= 2 KiB) carried only on the host pi-fabric:workflow-item:v1 event. */
+  meta?: Record<string, unknown>;
 }
 interface FabricWorkflowApi {
   agent<T = string>(prompt: string, options?: FabricWorkflowAgentOptions): Promise<T>;

@@ -291,6 +291,11 @@ interface FabricEntropyConfig {
   compile: boolean;
 }
 
+interface FabricTraceConfig {
+  /** Persist the opt-in FabricAssessmentTraceV1 (timings, usage) beside the execution trace. */
+  assessment: boolean;
+}
+
 /** One configured portable memory source (see docs/memory-recall.md). */
 export interface FabricMemorySourceConfig {
   /** Registry id used as `args.source` in source-qualified memory calls. */
@@ -367,6 +372,7 @@ export interface FabricConfig {
   jev: FabricJevConfig;
   entropy: FabricEntropyConfig;
   repairs: FabricRepairsConfig;
+  trace: FabricTraceConfig;
   schema: FabricSchemaConfig;
   speculation: FabricSpeculationConfig;
   codePreview: CodePreviewSettings;
@@ -547,6 +553,9 @@ export const DEFAULT_FABRIC_CONFIG: FabricConfig = {
   },
   repairs: {
     enabled: true,
+  },
+  trace: {
+    assessment: false,
   },
   schema: {
     mode: "off",
@@ -800,6 +809,7 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
   const memorySources = memorySourcesValue(memory.sources);
   const entropy = objectValue(input.entropy);
   const repairs = objectValue(input.repairs);
+  const trace = objectValue(input.trace);
   const modelsSection = objectValue(input.models);
   const schema = objectValue(input.schema);
   const schemaMode = schemaModeValue(schema.mode, DEFAULT_FABRIC_CONFIG.schema.mode);
@@ -1346,6 +1356,9 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
     },
     repairs: {
       enabled: booleanValue(repairs.enabled, DEFAULT_FABRIC_CONFIG.repairs.enabled),
+    },
+    trace: {
+      assessment: booleanValue(trace.assessment, DEFAULT_FABRIC_CONFIG.trace.assessment),
     },
     schema: {
       mode: schemaMode,
