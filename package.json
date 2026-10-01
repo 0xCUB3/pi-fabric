@@ -1,6 +1,6 @@
 {
   "name": "pi-fabric",
-  "version": "0.103.1",
+  "version": "0.104.0",
   "description": "A programmable tool and agent runtime for Pi",
   "type": "module",
   "main": "./dist/index.js",
@@ -24,6 +24,10 @@
     "./runners": {
       "types": "./dist/runners.d.ts",
       "import": "./dist/runners.js"
+    },
+    "./durable": {
+      "types": "./dist/durable.d.ts",
+      "import": "./dist/durable.js"
     },
     "./mcp": {
       "types": "./dist/mcp.d.ts",
@@ -143,13 +147,21 @@
     "yaml": "^2.9.0"
   },
   "peerDependencies": {
+    "@earendil-works/chord": "1.0.0",
+    "@earendil-works/pi-durable": "1.0.0",
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-agent-core": "*",
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*",
     "typebox": "*"
   },
+  "peerDependenciesMeta": {
+    "@earendil-works/chord": { "optional": true },
+    "@earendil-works/pi-durable": { "optional": true }
+  },
   "devDependencies": {
+    "@earendil-works/chord": "1.0.0",
+    "@earendil-works/pi-durable": "1.0.0",
     "@earendil-works/pi-ai": "1.0.0",
     "@earendil-works/pi-agent-core": "1.0.0",
     "@earendil-works/pi-coding-agent": "1.0.0",

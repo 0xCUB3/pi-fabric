@@ -33,6 +33,7 @@ describe("runner registry stays off the startup graph", () => {
     expect(closure.size).toBeGreaterThan(40);
     for (const lazy of [
       "src/runners.ts",
+      "src/durable.ts",
       "src/agents/runner-registry.ts",
       "src/agents/runner-protocol.ts",
       "src/agents/hosted-run.ts",

@@ -9,6 +9,8 @@ const primaryEntryPoints = [
   "src/agents.ts",
   // Runner adapter registration; never reachable from the extension entry.
   "src/runners.ts",
+  // Opt-in durable Pi adapter; never reachable from the extension entry.
+  "src/durable.ts",
   "src/jev.ts",
   "src/assessment.ts",
   // Public `pi-fabric/scope`; also the extension's first-use scope parser.

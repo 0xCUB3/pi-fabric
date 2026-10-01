@@ -22,6 +22,8 @@ import type { CodePreviewSettings } from "./code-preview.js";
 import type { NativeConversationTranscript } from "./conversation-native-reader.js";
 import { defaultConversationTarget } from "./conversation-targets.js";
 import { ConversationTextSelection } from "./conversation-selection.js";
+import { ConversationScrollbar } from "./conversation-scrollbar.js";
+import { ConversationLatest } from "./conversation-latest.js";
 import { appendConversationPrompt, conversationPromptHistory } from "./conversation-history.js";
 import { conversationAssistantText, conversationCommandCompletion, CONVERSATION_COMMAND_HELP } from "./conversation-commands.js";
 import { ConversationQueueStore } from "./conversation-queue-store.js";
@@ -244,6 +246,8 @@ export class FabricConversationView implements Component, Focusable {
   private readonly options: FabricConversationOptions;
   private readonly state: FabricConversationState;
   private readonly renderer: FabricConversationTranscriptRenderer;
+  private readonly scrollbar: ConversationScrollbar;
+  private readonly latest = new ConversationLatest();
   private editor: BorderStatusEditor | undefined;
   private suspendedEditor: BorderStatusEditor | undefined;
   private editorEpoch = -1;
@@ -291,6 +295,7 @@ export class FabricConversationView implements Component, Focusable {
     this.theme = theme;
     this.options = options;
     this.state = options.state;
+    this.scrollbar = new ConversationScrollbar(theme, options.appearance?.scrollbar);
     this.updateTargets();
     this.renderer = new FabricConversationTranscriptRenderer(tui, theme, {
       ...options.rendererOptions,
@@ -461,6 +466,24 @@ export class FabricConversationView implements Component, Focusable {
     if (this.disposed) return undefined;
     this.ensureEditorEpoch();
     this.updateTargets();
+    if (this.mode === "conversation" && !this.textSelection.dragging && this.latest.hit(event)) {
+      this.followLatest();
+      this.tui.requestRender();
+      return { handled: true };
+    }
+    if (this.mode === "conversation" && this.currentId && !this.textSelection.dragging &&
+      this.scrollbar.handleMouse(event, (position) => {
+        const entry = this.state.view(this.currentId!);
+        this.textSelection.clear();
+        entry.pageAnchor = undefined;
+        entry.anchorLength = undefined;
+        entry.scroll = position;
+        entry.following = position === Math.max(0, this.lastBodyLength - this.lastBodyBudget);
+      })) {
+      this.textSelection.clear();
+      this.tui.requestRender();
+      return { handled: true, capture: true };
+    }
     if (event.type === "wheel") {
       if (this.mode === "picker") {
         this.refreshPicker();
@@ -499,6 +522,7 @@ export class FabricConversationView implements Component, Focusable {
   }
 
   render(width: number): string[] {
+    this.latest.clear();
     if (this.disposed || width <= 0) return [];
     this.updateTargets();
     if (width !== this.selectionWidth) {
@@ -511,7 +535,8 @@ export class FabricConversationView implements Component, Focusable {
     const target = this.currentTarget();
     const queue = this.mode === "conversation" ? this.currentQueue() : undefined;
     this.observe();
-    const liveTranscriptLines = this.mode === "conversation" ? this.transcriptLines(width) : [];
+    const contentWidth = this.scrollbar.contentWidth(width);
+    const liveTranscriptLines = this.mode === "conversation" ? this.transcriptLines(contentWidth) : [];
     const transcriptLines = this.textSelection.source ?? liveTranscriptLines;
     let queueLines = queue?.render(width) ?? [];
     // Native components own their interior padding. Giving them the full width
@@ -555,7 +580,7 @@ export class FabricConversationView implements Component, Focusable {
     this.editorHeight = editorLines.length;
     const body = remaining <= 0 ? [] : this.mode === "picker"
       ? this.pickerLines(width, remaining)
-      : this.windowBody(transcriptLines, remaining, this.transcriptTail(width, remaining, editorShowsTopBorder));
+      : this.windowBody(transcriptLines, remaining, this.transcriptTail(contentWidth, remaining, editorShowsTopBorder));
     this.bodyTop = head.length;
     const scroll = this.currentId ? this.state.view(this.currentId).scroll : 0;
     this.bodyHeight = this.mode === "conversation" ? Math.max(0, Math.min(remaining, this.lastBody.length - scroll)) : 0;
@@ -563,6 +588,14 @@ export class FabricConversationView implements Component, Focusable {
       for (let row = 0; row < this.bodyHeight; row++) body[row] = this.textSelection.highlight(body[row]!, scroll + row, this.theme);
     }
     while (body.length < remaining) body.push("");
+    if (this.mode === "conversation" && remaining > 0) {
+      const entry = this.currentId ? this.state.view(this.currentId) : undefined;
+      this.scrollbar.sync(width, this.bodyTop, remaining, this.lastBodyLength, scroll, entry?.following ?? true,
+        () => { if (!this.disposed) this.tui.requestRender(); });
+      this.scrollbar.paint(body);
+      this.latest.paint(body, width, this.bodyTop, !!entry && (!entry.following || !!this.observedTranscript?.hasNewer),
+        this.scrollbar.visible, this.theme);
+    } else this.scrollbar.reset();
     return [...head, ...body.slice(0, remaining), ...queueLines, ...editorLines, ...footer, ...hints]
       .slice(0, rows)
       .map((line) => visibleWidth(line) <= width ? line : truncateToWidth(line, width, ""));
@@ -649,6 +682,8 @@ export class FabricConversationView implements Component, Focusable {
   dispose(): void {
     if (this.currentId) this.state.queues.detach(this.currentId);
     this.disposed = true;
+    this.latest.clear();
+    this.scrollbar.reset();
     this.clearCommandNotification();
     this.copyVersion++;
     this.textSelection.clear();
@@ -696,6 +731,8 @@ export class FabricConversationView implements Component, Focusable {
     }
     const changed = this.currentId !== id;
     if (changed) {
+      this.latest.clear();
+      this.scrollbar.reset();
       this.clearCommandNotification();
       this.copyVersion++;
       this.textSelection.clear();
@@ -1224,6 +1261,7 @@ export class FabricConversationView implements Component, Focusable {
   }
 
   private followLatest(): void {
+    this.latest.clear();
     this.textSelection.clear();
     if (!this.currentId) return;
     this.options.loadLatest(this.currentId);
@@ -1234,6 +1272,8 @@ export class FabricConversationView implements Component, Focusable {
   }
 
   private openPicker(): void {
+    this.latest.clear();
+    this.scrollbar.reset();
     this.clearCommandNotification();
     this.copyVersion++;
     this.textSelection.clear();

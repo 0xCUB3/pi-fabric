@@ -317,6 +317,8 @@ Veda children do not have recursive Fabric capabilities. Fabric rejects `recursi
 
 ### Custom runners
 
+For an opt-in implementation backed by the experimental Pi durable harness, see [Durable Pi runner](durable-pi.md). It uses this hosted-runner contract; importing it does not replace the default Pi runner or make arbitrary `fabric_exec` programs replay-safe.
+
 A Pi extension can add a runner through the `pi-fabric/runners` subpath. The subpath is never loaded by the Fabric extension at startup.
 
 ```ts

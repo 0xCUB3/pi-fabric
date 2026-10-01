@@ -22,6 +22,7 @@ import { createDashboardSnapshot, FabricDashboardSnapshotCache } from "./snapsho
 import { safeText } from "./format.js";
 import { isActiveStatus, type FabricDashboardSnapshot, type FabricUiActor, type FabricUiAgent } from "./types.js";
 import { FabricWidget, shouldShowFabricWidget } from "./widget.js";
+import { FabricWidgetRetention } from "./retention.js";
 import { AgentTranscriptReader, type FabricTranscriptSource } from "./transcript.js";
 
 const WIDGET_ID = "pi-fabric";
@@ -95,6 +96,7 @@ export class FabricUiController {
   #activeConversationReader: string | undefined;
   readonly #snapshotCache = new FabricDashboardSnapshotCache();
   #refreshGeneration = 0;
+  readonly #widgetRetention = new FabricWidgetRetention();
 
   constructor(
     readonly state: FabricState,
@@ -156,6 +158,7 @@ export class FabricUiController {
     this.#events = [];
     this.#meshOffset = 0;
     this.#snapshot = emptySnapshot();
+    this.#widgetRetention.clear();
     this.#lastRefreshErrorAt = 0;
     this.#lastRefreshAt = 0;
     this.#dashboardOpen = false;
@@ -641,8 +644,10 @@ export class FabricUiController {
       this.#timer = undefined;
     }
     if (this.#timer || !this.#context) return;
+    const expiryDelay = this.#widgetRetention.nextExpiryDelay(this.#snapshot, Date.now());
     const active =
-      this.#snapshot.shells?.some(job => job.finishedAt === undefined || Date.now() - job.finishedAt < 30000) ||
+      expiryDelay !== undefined ||
+      this.#snapshot.shells?.some(job => job.finishedAt === undefined) ||
       this.#snapshot.runs.some((run) => run.status === "running") ||
       this.#snapshot.peers.length > 0 ||
       this.#snapshot.agents.some((agent) => isActiveStatus(agent.status)) ||
@@ -656,7 +661,7 @@ export class FabricUiController {
       this.#timer = undefined;
       this.#refresh(false);
       this.#schedulePoll();
-    }, this.state.config.ui.refreshMs);
+    }, Math.min(this.state.config.ui.refreshMs, expiryDelay ?? Infinity));
     this.#timer.unref();
   }
 
@@ -749,6 +754,7 @@ export class FabricUiController {
         this.#dashboardOpen ? undefined : this.#snapshotCache,
         this.#activityView !== undefined,
       );
+      this.#widgetRetention.sync(this.#snapshot);
       this.#renderWidget(context);
       // Read the native source even when manager metadata is unchanged: log
       // appends and pinned-window growth do not require a status revision.
@@ -781,7 +787,7 @@ export class FabricUiController {
     const config = this.state.config.ui;
     const shouldShow =
       context.mode === "tui" &&
-      shouldShowFabricWidget(this.#snapshot, config.widget);
+      shouldShowFabricWidget(this.#snapshot, config.widget, this.#widgetRetention);
     if (shouldShow) {
       if (this.#widgetMounted) return;
       this.#widgetMounted = true;
@@ -794,6 +800,7 @@ export class FabricUiController {
             () => this.#snapshot,
             config.maxRows,
             () => tui.terminal?.rows ?? process.stdout.rows,
+            this.#widgetRetention,
           );
           return this.#widget;
         },
