@@ -420,7 +420,10 @@ describe("agent manager spawning primitives", () => {
     const before = git(repository, "worktree", "list", "--porcelain");
     await expect(manager.spawn({
       task: "never launched", transport: "process", worktree: true,
-      worktreeSetup: "echo installing; echo broken >&2; exit 3",
+      // Setup runs through cmd.exe on Windows and /bin/sh elsewhere.
+      worktreeSetup: process.platform === "win32"
+        ? "echo installing & echo broken 1>&2 & exit 3"
+        : "echo installing; echo broken >&2; exit 3",
     })).rejects.toThrow(/Worktree setup command exited with 3:\n[\s\S]*broken/);
     expect(git(repository, "worktree", "list", "--porcelain")).toBe(before);
   });

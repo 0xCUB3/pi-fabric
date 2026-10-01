@@ -18,7 +18,8 @@ const staticClosure = (entry: string): Set<string> => {
     if (seen.has(file)) continue;
     seen.add(file);
     for (const match of source(file).matchAll(RUNTIME_EDGE)) {
-      const target = path.join(path.dirname(file), match[1]!).replace(/\.js$/, ".ts");
+      // Posix joins keep closure keys stable on Windows.
+      const target = path.posix.join(path.posix.dirname(file), match[1]!).replace(/\.js$/, ".ts");
       if (fs.existsSync(path.join(root, target))) stack.push(target);
     }
   }
