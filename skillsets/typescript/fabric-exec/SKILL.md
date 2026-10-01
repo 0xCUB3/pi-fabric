@@ -101,10 +101,10 @@ All calls return promises. Fields ending in `?` are optional; `unknown` marks pr
 | `thinking.status()` | `{level,available,bounds:{min,max},baseline,override?:{level,scope,remainingTurns?,reason?,setAt}}` |
 | `thinking.set({level,scope?,turns?,reason?})` | status plus `clamped:true,requested` when clamped; `scope` `"turn"` (default, reverts at agent_end) / `"turns"` (needs `turns` 1–20) / `"session"` |
 | `thinking.reset()` | status after restoring the baseline level |
-| `decisions.raise({title,kind?,body?,options?,input?,holder?,timeoutMs?\|deadline?,onExpire?,defaultOptionId?})` | `{id}`; durable pending approval/question/escalation in the mesh; `holder` `"user"` (default, humans only) / `"root"` / `"supervisor:<id>"` |
+| `decisions.raise({title,kind?,body?,options?,input?,holder?,timeoutMs?\|deadline?,onExpire?,defaultOptionId?,escalation?})` | `{id}`; durable pending approval/question/escalation in the mesh; `holder` `"user"` (default, humans only) / `"root"` / `"supervisor:<id>"`; `onExpire:"escalate"` with `escalation:{chain?,hopTimeoutMs?,onFinal?}` moves it up the chain (default supervisor→root→user) per expired hop |
 | `decisions.wait({id,timeoutMs?})` | the record once answered/expired/cancelled (still `open` on timeout): `{status,answer?:{optionId?,text?,answeredBy,via,at},...}` |
 | `decisions.list({status?,holder?,limit?}?)` | records newest first; read-only |
-| `decisions.answer({id,optionId?,text?})` / `decisions.cancel({id})` | the updated record; refused for `"user"` holders, other participants' holds, and decisions raised in the same call |
+| `decisions.answer({id,optionId?,text?})` / `decisions.escalate({id,reason?})` / `decisions.cancel({id})` | the updated record; refused for `"user"` holders, other participants' holds, and decisions raised in the same call; `escalate` hands it to the next chain holder now |
 | `programs.save({name,code?,kind?,kernel?,jevProgram?,description?,inputSchema?})` | `{ref:"name@digest12",digest}`; always a candidate; identical content returns the same ref |
 | `programs.list({name?,status?}?)` / `programs.get({ref})` | summaries `{ref,name,digest,kind,kernel?,status,createdAt,...}` / the full record; read-only |
 | `programs.run({ref,input?,requirePromoted?})` | the program's return value; runs nested with this program's capabilities and approvals; `input` is its `input` global |

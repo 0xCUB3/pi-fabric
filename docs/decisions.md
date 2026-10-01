@@ -23,8 +23,10 @@ Decisions live under the reserved mesh key prefix `decisions/<id>`. `mesh.get` a
   raisedBy: { participantId, runId?, sessionId? },
   holder: "root" | "user" | "supervisor:<participantId>",
   createdAt, deadline?,        // epoch ms
-  onExpire: "cancel" | "default",
+  onExpire: "cancel" | "default" | "escalate",
   defaultOptionId?,
+  escalation?: { chain, hop, hopTimeoutMs, onFinal: "cancel" | "default" },
+  history?: [{ holder, until, reason: "expired" | "escalated", text?, by? }],
   status: "open" | "answered" | "expired" | "cancelled",
   answer?: { optionId?, text?, answeredBy, via, at },
 }
@@ -35,7 +37,7 @@ Decisions live under the reserved mesh key prefix `decisions/<id>`. `mesh.get` a
 - `onExpire: "default"` needs `defaultOptionId` and a deadline. An expired decision then carries `answer: { optionId: defaultOptionId, answeredBy: "deadline", via: "expiry" }`. With `"cancel"` (the default) it expires with no answer.
 - Every transition leaves `open` through a mesh compare-and-swap, so two answerers cannot both win. The loser gets `Decision <id> is answered, not open`.
 - Expiry is lazy: the first reader after the deadline (`get`, `list`, `wait`, an answer attempt, the CLI) writes the `expired` record. A decision with a passed deadline is never answered.
-- Each transition also publishes a wake hint on the `fabric.decisions` mesh topic (`decision.raised`, `decision.answered`, `decision.expired`, `decision.cancelled`, data `{ id, kind, holder, status, title }`). The record stays authoritative.
+- Each transition also publishes a wake hint on the `fabric.decisions` mesh topic (`decision.raised`, `decision.escalated`, `decision.answered`, `decision.expired`, `decision.cancelled`, data `{ id, kind, holder, status, title, hop? }`). The record stays authoritative.
 - A mesh root keeps at most 200 open decisions. Resolved decisions stay for 7 days and are pruned first when the store reaches 500 records.
 
 ## Guest API
@@ -58,10 +60,11 @@ Python uses the same calls, for example `await decisions.raise(title="Deploy?", 
 
 | Action | Risk | Result |
 | --- | --- | --- |
-| `decisions.raise({kind?, title, body?, options?, input?, holder?, deadline? \| timeoutMs?, onExpire?, defaultOptionId?})` | agent | `{ id }` |
+| `decisions.raise({kind?, title, body?, options?, input?, holder?, deadline? \| timeoutMs?, onExpire?, defaultOptionId?, escalation?})` | agent | `{ id }` |
 | `decisions.wait({id, timeoutMs?})` | read | the record once it leaves `open`; the still-open record when `timeoutMs` passes |
-| `decisions.list({status?, holder?, limit?})` | read, no effect, speculation-eligible | records, newest first (limit 1..200, default 50) |
+| `decisions.list({status?, holder?, limit?})` | read, no effect, speculation-eligible | records, newest first (limit 1..200, default 50); `holder` matches the current holder |
 | `decisions.answer({id, optionId?, text?})` | agent | the answered record |
+| `decisions.escalate({id, reason?})` | agent | the record, now held by the next holder in its chain |
 | `decisions.cancel({id})` | agent | the cancelled record |
 
 `wait` polls the mesh and stops when the calling program is aborted. `holder` defaults to `"user"`.
@@ -74,7 +77,32 @@ Python uses the same calls, for example `await decisions.raise(title="Deploy?", 
 | `root` | a root session participant (`mesh.self().kind === "main"`) | allowed |
 | `supervisor:<participantId>` | that participant only | allowed |
 
-A program also cannot answer a decision that it raised in the same `fabric_exec` call, whatever the holder. This keeps a model from approving its own request. `decisions.cancel` is open to the raiser and to an authorized holder.
+A program also cannot answer a decision that it raised in the same `fabric_exec` call, whatever the holder. This keeps a model from approving its own request. `decisions.escalate` follows the same rules. `decisions.cancel` is open to the raiser and to an authorized holder. Fabric checks the holder against the exact record that the compare-and-swap replaces, so a holder that lost a decision to an escalation cannot still answer it.
+
+## Escalation chains
+
+`onExpire: "escalate"` hands an unanswered decision to the next holder when a deadline passes, and the decision stays `open`:
+
+```ts
+const { id } = await decisions.raise({
+  title: "Retry the flaky migration?",
+  options: [{ id: "retry", label: "Retry" }, { id: "skip", label: "Skip" }],
+  holder: "supervisor:run-lead",
+  onExpire: "escalate",
+  escalation: { hopTimeoutMs: 15 * 60_000, onFinal: "default" },
+  defaultOptionId: "skip",
+});
+```
+
+- `escalation.chain` lists holders in order with the holder grammar above: at most 8 entries, no duplicates, and the first entry equals `holder`. Without it the chain climbs from the holder: `supervisor:<id>` then `root` then `user`, `root` then `user`, and `user` alone. Fabric freezes the chain on the record at raise time.
+- `escalation.hopTimeoutMs` (1 s to 7 days, default 10 minutes) is each hop's time. The first hop ends at `deadline` or `timeoutMs` when given, else one hop after the raise. Each later hop ends one `hopTimeoutMs` after the previous deadline, so a reader that arrives late applies every elapsed hop in one compare-and-swap.
+- `escalation.onFinal` (`"cancel"` by default, or `"default"`, which needs `defaultOptionId`) resolves the decision when the last holder's deadline passes, exactly like a plain `onExpire`.
+- A move sets `holder` to the next chain entry, advances `escalation.hop`, appends `{ holder, until, reason: "expired" }` to `history` for the previous holder, and publishes `decision.escalated`. Expiry stays lazy: `get`, `list`, `wait`, an answer attempt, the TUI, and the CLI all apply it. Two racing readers cannot both move the decision.
+- `decisions.escalate({ id, reason? })` lets the current holder pass the decision up now. The next holder gets a fresh `hopTimeoutMs`, and `history` records `reason: "escalated"`, the `text` (up to 500 characters), and `by`. Fabric refuses it for a decision without a further holder, which includes every decision without `onExpire: "escalate"`.
+- Authority follows the holder. After a move the previous holder can no longer answer or escalate, and a decision that reaches `user` is answered only by a person.
+- `/fabric decisions` and `pi-fabric decisions list` show the hop and chain, for example `hop 2/3 chain=supervisor:run-lead>root>user`.
+
+Records from before escalation chains carry neither `escalation` nor `history` and expire as before.
 
 Authority for the human surfaces is local file access to the mesh root. Until principals and scopes land, anyone who can write the mesh root as the same OS user can answer any decision.
 

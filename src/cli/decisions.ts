@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { MeshStore } from "../mesh/store.js";
-import { DecisionStore, type DecisionRecord, type DecisionStatus } from "../decisions/store.js";
+import { decisionEscalation, DecisionStore, type DecisionRecord, type DecisionStatus } from "../decisions/store.js";
 
 // `pi-fabric decisions list|answer`: answer durable Fabric decisions from
 // outside any Pi session. Authority is local file access to the mesh root
@@ -62,7 +62,11 @@ const operator = (): string => {
 const line = (record: DecisionRecord): string => {
   const options = record.options ? ` [${record.options.map((option) => `${option.id}=${option.label}`).join(", ")}]` : "";
   const deadline = record.deadline ? ` deadline=${new Date(record.deadline).toISOString()}` : "";
-  return `${record.id}  ${record.status}  ${record.kind}  holder=${record.holder}${deadline}  ${record.title}${options}`;
+  const escalation = decisionEscalation(record);
+  const chain = escalation
+    ? ` hop ${escalation.hop + 1}/${escalation.chain.length} chain=${escalation.chain.join(">")}`
+    : "";
+  return `${record.id}  ${record.status}  ${record.kind}  holder=${record.holder}${chain}${deadline}  ${record.title}${options}`;
 };
 
 export const runDecisionsCli = async (

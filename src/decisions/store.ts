@@ -5,7 +5,9 @@ import type { MeshIdentity, MeshStateEntry, MeshStore } from "../mesh/store.js";
 // project mesh under `decisions/<id>`. Every transition is a mesh
 // compare-and-swap from `open`, so two answerers (a TUI dialog, the
 // `pi-fabric decisions` CLI, a supervising program) cannot both win. Expiry is
-// applied lazily by whichever reader first observes a passed deadline.
+// applied lazily by whichever reader first observes a passed deadline. An
+// escalating decision moves along a chain of holders frozen at raise time;
+// each move is the same compare-and-swap, so exactly one mover wins.
 
 export type DecisionKind = "approval" | "question" | "escalation";
 export type DecisionInput = "text" | "confirm" | "select" | "editor";
@@ -25,6 +27,25 @@ export interface DecisionAnswer {
   at: number;
 }
 
+export type DecisionOnExpire = "cancel" | "default" | "escalate";
+
+export interface DecisionEscalation {
+  /** Holders in order, frozen at raise time; `chain[0]` is the first holder. */
+  chain: DecisionHolder[];
+  /** Index of the current holder in `chain`. */
+  hop: number;
+  hopTimeoutMs: number;
+  onFinal: "cancel" | "default";
+}
+
+export interface DecisionHistoryEntry {
+  holder: DecisionHolder;
+  until: number;
+  reason: "expired" | "escalated";
+  text?: string;
+  by?: string;
+}
+
 export interface DecisionRecord {
   id: string;
   kind: DecisionKind;
@@ -36,8 +57,10 @@ export interface DecisionRecord {
   holder: DecisionHolder;
   createdAt: number;
   deadline?: number;
-  onExpire: "cancel" | "default";
+  onExpire: DecisionOnExpire;
   defaultOptionId?: string;
+  escalation?: DecisionEscalation;
+  history?: DecisionHistoryEntry[];
   status: DecisionStatus;
   answer?: DecisionAnswer;
 }
@@ -53,6 +76,7 @@ export interface DecisionRaiseInput {
   timeoutMs?: unknown;
   onExpire?: unknown;
   defaultOptionId?: unknown;
+  escalation?: unknown;
 }
 
 export const DECISION_PREFIX = "decisions/";
@@ -63,6 +87,11 @@ export const MAX_DECISION_TEXT_CHARS = 4_000;
 export const MAX_DECISION_OPTIONS = 12;
 export const MAX_DECISION_DEADLINE_MS = 30 * 24 * 60 * 60 * 1_000;
 export const MAX_OPEN_DECISIONS = 200;
+export const MAX_ESCALATION_HOPS = 8;
+export const MIN_ESCALATION_HOP_MS = 1_000;
+export const MAX_ESCALATION_HOP_MS = 7 * 24 * 60 * 60 * 1_000;
+export const DEFAULT_ESCALATION_HOP_MS = 10 * 60 * 1_000;
+export const MAX_ESCALATION_REASON_CHARS = 500;
 const MAX_STORED_DECISIONS = 500;
 const RESOLVED_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
 const OPTION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
@@ -122,6 +151,47 @@ const optionsValue = (value: unknown): DecisionOption[] | undefined => {
   });
 };
 
+/** The default chain climbs from the given holder: supervisor -> root -> user. */
+export const defaultEscalationChain = (holder: DecisionHolder): DecisionHolder[] =>
+  holder === "user" ? ["user"] : holder === "root" ? ["root", "user"] : [holder, "root", "user"];
+
+const escalationValue = (
+  value: unknown,
+  holder: DecisionHolder,
+): Omit<DecisionEscalation, "hop"> => {
+  if (value !== undefined && (typeof value !== "object" || value === null || Array.isArray(value))) {
+    throw new Error("Decision escalation must be an object");
+  }
+  const input = (value ?? {}) as Record<string, unknown>;
+  for (const key of Object.keys(input)) {
+    if (key !== "chain" && key !== "hopTimeoutMs" && key !== "onFinal") {
+      throw new Error(`Unknown decision escalation field: ${key}`);
+    }
+  }
+  let chain = defaultEscalationChain(holder);
+  if (input.chain !== undefined) {
+    if (!Array.isArray(input.chain) || input.chain.length === 0 || input.chain.length > MAX_ESCALATION_HOPS) {
+      throw new Error(`Decision escalation chain must be 1..${MAX_ESCALATION_HOPS} holders`);
+    }
+    chain = input.chain.map((entry) => {
+      if (entry === undefined) throw new Error("Decision escalation chain entries must be holders");
+      return decisionHolderValue(entry);
+    });
+    if (new Set(chain).size !== chain.length) throw new Error("Decision escalation chain repeats a holder");
+    if (chain[0] !== holder) throw new Error(`Decision escalation chain must start with the holder (${holder})`);
+  }
+  const hopTimeoutMs = input.hopTimeoutMs ?? DEFAULT_ESCALATION_HOP_MS;
+  if (typeof hopTimeoutMs !== "number" || !Number.isFinite(hopTimeoutMs) ||
+      hopTimeoutMs < MIN_ESCALATION_HOP_MS || hopTimeoutMs > MAX_ESCALATION_HOP_MS) {
+    throw new Error(`Decision escalation hopTimeoutMs must be ${MIN_ESCALATION_HOP_MS}..${MAX_ESCALATION_HOP_MS}`);
+  }
+  const onFinal = input.onFinal ?? "cancel";
+  if (onFinal !== "cancel" && onFinal !== "default") {
+    throw new Error('Decision escalation onFinal must be "cancel" or "default"');
+  }
+  return { chain, hopTimeoutMs: Math.floor(hopTimeoutMs), onFinal };
+};
+
 /** Validate raise arguments into an open record; throws on any malformed field. */
 export const buildDecisionRecord = (
   input: DecisionRaiseInput,
@@ -162,9 +232,15 @@ export const buildDecisionRecord = (
     deadline = Math.floor(input.deadline);
   }
   const onExpire = input.onExpire ?? "cancel";
-  if (onExpire !== "cancel" && onExpire !== "default") {
-    throw new Error('Decision onExpire must be "cancel" or "default"');
+  if (onExpire !== "cancel" && onExpire !== "default" && onExpire !== "escalate") {
+    throw new Error('Decision onExpire must be "cancel", "default", or "escalate"');
   }
+  const holder = decisionHolderValue(input.holder);
+  if (onExpire !== "escalate" && input.escalation !== undefined) {
+    throw new Error('Decision escalation requires onExpire "escalate"');
+  }
+  const escalation = onExpire === "escalate" ? escalationValue(input.escalation, holder) : undefined;
+  if (escalation) deadline ??= now + escalation.hopTimeoutMs;
   let defaultOptionId: string | undefined;
   if (input.defaultOptionId !== undefined) {
     if (typeof input.defaultOptionId !== "string" || !options?.some((option) => option.id === input.defaultOptionId)) {
@@ -175,6 +251,9 @@ export const buildDecisionRecord = (
   if (onExpire === "default" && (!defaultOptionId || deadline === undefined)) {
     throw new Error('Decision onExpire "default" requires defaultOptionId and a deadline');
   }
+  if (escalation?.onFinal === "default" && !defaultOptionId) {
+    throw new Error('Decision escalation onFinal "default" requires defaultOptionId');
+  }
   return {
     id: `dec_${randomBytes(12).toString("base64url")}`,
     kind: kind as DecisionKind,
@@ -183,11 +262,12 @@ export const buildDecisionRecord = (
     ...(options ? { options } : {}),
     input: mode,
     raisedBy: structuredClone(raisedBy),
-    holder: decisionHolderValue(input.holder),
+    holder,
     createdAt: now,
     ...(deadline !== undefined ? { deadline } : {}),
     onExpire,
     ...(defaultOptionId ? { defaultOptionId } : {}),
+    ...(escalation ? { escalation: { chain: escalation.chain, hop: 0, hopTimeoutMs: escalation.hopTimeoutMs, onFinal: escalation.onFinal } } : {}),
     status: "open",
   };
 };
@@ -223,6 +303,61 @@ export const validateDecisionAnswer = (
   if (text === undefined) throw new Error(`Decision ${record.id} needs a text answer`);
   return { text };
 };
+
+/** The stored chain when it is well formed; a malformed one escalates nowhere. */
+export const decisionEscalation = (record: DecisionRecord): DecisionEscalation | undefined => {
+  const escalation = record.onExpire === "escalate" ? record.escalation : undefined;
+  if (!escalation || !Array.isArray(escalation.chain) || escalation.chain.length === 0 ||
+      escalation.chain.length > MAX_ESCALATION_HOPS || !Number.isInteger(escalation.hop) ||
+      escalation.hop < 0 || escalation.hop >= escalation.chain.length ||
+      typeof escalation.hopTimeoutMs !== "number" || !(escalation.hopTimeoutMs >= MIN_ESCALATION_HOP_MS)) {
+    return undefined;
+  }
+  return escalation;
+};
+
+/**
+ * Apply every deadline that has passed by `now`. Each elapsed hop hands the
+ * decision to the next holder with a deadline one hopTimeoutMs after the
+ * previous one, so a late reader lands where a punctual one would have. Past
+ * the last hop, `onFinal` resolves it like a plain cancel/default expiry.
+ */
+export const applyDecisionDeadline = (record: DecisionRecord, now: number): DecisionRecord => {
+  if (record.status !== "open" || record.deadline === undefined || now < record.deadline) return record;
+  let current = record;
+  let onExpire: "cancel" | "default" = record.onExpire === "default" ? "default" : "cancel";
+  const escalation = decisionEscalation(record);
+  if (escalation) {
+    let { hop } = escalation;
+    let holder = record.holder;
+    let deadline = record.deadline;
+    const history = [...(record.history ?? [])];
+    while (deadline <= now && hop + 1 < escalation.chain.length) {
+      history.push({ holder, until: deadline, reason: "expired" });
+      hop += 1;
+      holder = escalation.chain[hop]!;
+      deadline += escalation.hopTimeoutMs;
+    }
+    current = { ...record, holder, deadline, escalation: { ...escalation, hop }, ...(history.length ? { history } : {}) };
+    if (now < deadline) return current;
+    onExpire = escalation.onFinal;
+  }
+  return {
+    ...current,
+    status: "expired",
+    ...(onExpire === "default" && current.defaultOptionId
+      ? { answer: { optionId: current.defaultOptionId, answeredBy: "deadline", via: "expiry", at: now } }
+      : {}),
+  };
+};
+
+/** `hop 2/3` for an escalating decision, undefined otherwise. */
+export const decisionHopLabel = (record: DecisionRecord): string | undefined => {
+  const escalation = decisionEscalation(record);
+  return escalation ? `hop ${escalation.hop + 1}/${escalation.chain.length}` : undefined;
+};
+
+type DecisionAuthorize = (record: DecisionRecord) => void;
 
 export class DecisionStore {
   constructor(
@@ -268,24 +403,56 @@ export class DecisionStore {
   }
 
   /** CAS open -> answered. Fails when the decision is missing or no longer open. */
+  // `authorize` runs against the exact record the compare-and-swap replaces,
+  // so a holder that lost the decision to an escalation cannot still act.
   async answer(
     id: string,
     input: DecisionAnswerInput,
     by: { answeredBy: string; via: string },
+    authorize?: DecisionAuthorize,
   ): Promise<DecisionRecord> {
     return this.#transition(id, (record) => ({
-      ...record,
+      ...authorized(record, authorize),
       status: "answered",
       answer: { ...validateDecisionAnswer(record, input), answeredBy: by.answeredBy, via: by.via, at: this.now() },
     }));
   }
 
-  async cancel(id: string, by: { answeredBy: string; via: string }): Promise<DecisionRecord> {
+  async cancel(id: string, by: { answeredBy: string; via: string }, authorize?: DecisionAuthorize): Promise<DecisionRecord> {
     return this.#transition(id, (record) => ({
-      ...record,
+      ...authorized(record, authorize),
       status: "cancelled",
       answer: { answeredBy: by.answeredBy, via: by.via, at: this.now() },
     }));
+  }
+
+  /** CAS the current holder's decision to the next holder in its chain now. */
+  async escalate(
+    id: string,
+    input: { reason?: unknown },
+    by: { escalatedBy: string },
+    authorize?: DecisionAuthorize,
+  ): Promise<DecisionRecord> {
+    const text = boundedText(input.reason, "escalation reason", MAX_ESCALATION_REASON_CHARS);
+    return this.#transition(id, (record) => {
+      authorized(record, authorize);
+      const escalation = decisionEscalation(record);
+      if (!escalation || escalation.hop + 1 >= escalation.chain.length) {
+        throw new Error(`Decision ${record.id} has no further holder to escalate to`);
+      }
+      const now = this.now();
+      const hop = escalation.hop + 1;
+      return {
+        ...record,
+        holder: escalation.chain[hop]!,
+        deadline: now + escalation.hopTimeoutMs,
+        escalation: { ...escalation, hop },
+        history: [
+          ...(record.history ?? []),
+          { holder: record.holder, until: now, reason: "escalated", ...(text !== undefined ? { text } : {}), by: by.escalatedBy },
+        ],
+      };
+    });
   }
 
   /**
@@ -326,7 +493,7 @@ export class DecisionStore {
         if (casConflict(error)) continue;
         throw error;
       }
-      await this.#notify(`decision.${updated.status}`, updated);
+      await this.#notify(updated.status === "open" ? "decision.escalated" : `decision.${updated.status}`, updated);
       return structuredClone(updated);
     }
     throw new Error(`Decision ${id} changed concurrently; read it again`);
@@ -336,20 +503,12 @@ export class DecisionStore {
     let current = entry;
     for (let attempt = 0; attempt < 8; attempt += 1) {
       const record = current.value as DecisionRecord;
-      if (record.status !== "open" || record.deadline === undefined || this.now() < record.deadline) {
-        return { record: structuredClone(record), version: current.version };
-      }
-      const expired: DecisionRecord = {
-        ...record,
-        status: "expired",
-        ...(record.onExpire === "default" && record.defaultOptionId
-          ? { answer: { optionId: record.defaultOptionId, answeredBy: "deadline", via: "expiry", at: this.now() } }
-          : {}),
-      };
+      const next = applyDecisionDeadline(record, this.now());
+      if (next === record) return { record: structuredClone(record), version: current.version };
       try {
-        const written = await this.mesh.put({ key: current.key, value: expired, identity: this.identity, ifVersion: current.version });
-        await this.#notify("decision.expired", expired);
-        return { record: expired, version: written.version };
+        const written = await this.mesh.put({ key: current.key, value: next, identity: this.identity, ifVersion: current.version });
+        await this.#notify(next.status === "open" ? "decision.escalated" : "decision.expired", next);
+        return { record: structuredClone(next), version: written.version };
       } catch (error) {
         if (!casConflict(error)) throw error;
         const reread = this.mesh.get(current.key);
@@ -391,13 +550,25 @@ export class DecisionStore {
         topic: DECISIONS_TOPIC,
         kind,
         from: this.identity,
-        data: { id: record.id, kind: record.kind, holder: record.holder, status: record.status, title: record.title },
+        data: {
+          id: record.id,
+          kind: record.kind,
+          holder: record.holder,
+          status: record.status,
+          title: record.title,
+          ...(record.escalation ? { hop: record.escalation.hop } : {}),
+        },
       });
     } catch {
       // Notification is a wake hint; the decision record is authoritative.
     }
   }
 }
+
+const authorized = (record: DecisionRecord, authorize?: DecisionAuthorize): DecisionRecord => {
+  authorize?.(record);
+  return record;
+};
 
 const abortableDelay = (ms: number, signal?: AbortSignal): Promise<void> =>
   new Promise((resolve, reject) => {

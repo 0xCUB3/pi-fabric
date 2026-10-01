@@ -1,7 +1,7 @@
 import os from "node:os";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { MeshIdentity, MeshStore } from "../mesh/store.js";
-import { DecisionStore, type DecisionRecord } from "./store.js";
+import { decisionHopLabel, DecisionStore, type DecisionRecord } from "./store.js";
 
 // `/fabric decisions [id]`: list open decisions and answer one through native
 // dialogs. The person at the terminal may answer any holder.
@@ -21,8 +21,11 @@ export const humanDecisionIdentity = (): MeshIdentity => {
   return { id: `user:${user}`, name: user, kind: "main" };
 };
 
-const summary = (record: DecisionRecord): string =>
-  `${record.title} · ${record.kind} · ${record.holder} · ${record.id.slice(-6)}`;
+const summary = (record: DecisionRecord): string => {
+  const hop = decisionHopLabel(record);
+  const chain = hop ? ` (${hop}: ${record.escalation!.chain.join(" > ")})` : "";
+  return `${record.title} · ${record.kind} · ${record.holder}${chain} · ${record.id.slice(-6)}`;
+};
 
 export const openFabricDecisions = async (
   mesh: MeshStore,

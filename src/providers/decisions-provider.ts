@@ -14,6 +14,10 @@ import {
   MAX_DECISION_OPTIONS,
   MAX_DECISION_TEXT_CHARS,
   MAX_DECISION_TITLE_CHARS,
+  MAX_ESCALATION_HOP_MS,
+  MAX_ESCALATION_HOPS,
+  MAX_ESCALATION_REASON_CHARS,
+  MIN_ESCALATION_HOP_MS,
   type DecisionRecord,
   type DecisionStatus,
 } from "../decisions/store.js";
@@ -23,9 +27,12 @@ import { actionArgNormalizer } from "./arg-normalization.js";
 // escalation; a human (TUI `/fabric decisions`, `pi-fabric decisions` CLI) or
 // the authorized holder answers it. Programs never answer decisions held by
 // "user", and never answer one they raised in the same fabric_exec call.
+// Authority follows the current holder: once an escalation moves a decision,
+// the previous holder can no longer answer or escalate it.
 
 const resource = ["fabric:decisions"];
 const idSchema = { type: "string", minLength: 8, maxLength: 72 };
+const holderSchema = { type: "string", maxLength: 139 };
 const descriptors: FabricActionDescriptor[] = [
   {
     name: "raise",
@@ -60,8 +67,18 @@ const descriptors: FabricActionDescriptor[] = [
         },
         deadline: { type: "number", description: "Epoch ms; at most 30 days ahead" },
         timeoutMs: { type: "integer", minimum: 1_000, maximum: MAX_DECISION_DEADLINE_MS },
-        onExpire: { type: "string", enum: ["cancel", "default"] },
+        onExpire: { type: "string", enum: ["cancel", "default", "escalate"] },
         defaultOptionId: { type: "string", maxLength: 64 },
+        escalation: {
+          type: "object",
+          additionalProperties: false,
+          description: 'With onExpire "escalate": holders in order (default climbs supervisor -> root -> user), per-hop timeout, and what the last expiry does',
+          properties: {
+            chain: { type: "array", minItems: 1, maxItems: MAX_ESCALATION_HOPS, items: holderSchema },
+            hopTimeoutMs: { type: "integer", minimum: MIN_ESCALATION_HOP_MS, maximum: MAX_ESCALATION_HOP_MS },
+            onFinal: { type: "string", enum: ["cancel", "default"] },
+          },
+        },
       },
     },
     risk: "agent",
@@ -85,13 +102,13 @@ const descriptors: FabricActionDescriptor[] = [
   },
   {
     name: "list",
-    description: "List decisions newest first, optionally by status and holder",
+    description: "List decisions newest first, optionally by status and current holder",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
         status: { type: "string", enum: ["open", "answered", "expired", "cancelled"] },
-        holder: { type: "string", maxLength: 139 },
+        holder: holderSchema,
         limit: { type: "integer", minimum: 1, maximum: 200 },
       },
     },
@@ -110,6 +127,22 @@ const descriptors: FabricActionDescriptor[] = [
         id: idSchema,
         optionId: { type: "string", maxLength: 64 },
         text: { type: "string", maxLength: MAX_DECISION_TEXT_CHARS },
+      },
+    },
+    risk: "agent",
+    namespace: "coordination",
+    effect: { kind: "emission", resources: resource, ordering: "ordered" },
+  },
+  {
+    name: "escalate",
+    description: "Pass an open decision this participant holds to the next holder in its escalation chain now",
+    inputSchema: {
+      type: "object",
+      required: ["id"],
+      additionalProperties: false,
+      properties: {
+        id: idSchema,
+        reason: { type: "string", maxLength: MAX_ESCALATION_REASON_CHARS },
       },
     },
     risk: "agent",
@@ -185,18 +218,22 @@ export class DecisionsProvider implements FabricProvider {
         });
       case "answer": {
         const id = assertDecisionId(args.id);
-        const record = await this.#requireOpen(id);
-        if (this.#raisedInCall.get(context.parentToolCallId)?.has(id)) {
-          throw new Error(`Decision ${id} was raised by this same program; it cannot answer it itself`);
-        }
-        this.#assertHolder(record);
-        return this.store.answer(id, args, { answeredBy: this.identity.id, via: "program" });
+        await this.#requireOpen(id);
+        this.#assertNotRaisedHere(id, context, "answer");
+        return this.store.answer(id, args, { answeredBy: this.identity.id, via: "program" }, (record) => this.#assertHolder(record));
+      }
+      case "escalate": {
+        const id = assertDecisionId(args.id);
+        await this.#requireOpen(id);
+        this.#assertNotRaisedHere(id, context, "escalate");
+        return this.store.escalate(id, args, { escalatedBy: this.identity.id }, (record) => this.#assertHolder(record));
       }
       case "cancel": {
         const id = assertDecisionId(args.id);
-        const record = await this.#requireOpen(id);
-        if (record.raisedBy.participantId !== this.identity.id) this.#assertHolder(record);
-        return this.store.cancel(id, { answeredBy: this.identity.id, via: "program" });
+        await this.#requireOpen(id);
+        return this.store.cancel(id, { answeredBy: this.identity.id, via: "program" }, (record) => {
+          if (record.raisedBy.participantId !== this.identity.id) this.#assertHolder(record);
+        });
       }
       default:
         throw new Error(`Unknown decisions action: ${name}`);
@@ -208,6 +245,12 @@ export class DecisionsProvider implements FabricProvider {
     if (!record) throw new Error(`Unknown decision: ${id}`);
     if (record.status !== "open") throw new Error(`Decision ${id} is ${record.status}, not open`);
     return record;
+  }
+
+  #assertNotRaisedHere(id: string, context: FabricInvocationContext, verb: string): void {
+    if (this.#raisedInCall.get(context.parentToolCallId)?.has(id)) {
+      throw new Error(`Decision ${id} was raised by this same program; it cannot ${verb} it itself`);
+    }
   }
 
   #assertHolder(record: DecisionRecord): void {
