@@ -446,7 +446,10 @@ export const controlProviderParticipant = async (
     participant.ownerHostId,
     participant.id,
     operation,
-    operation === "stop" ? {} : { message: message ?? "" },
+    {
+      ...(operation === "stop" ? {} : { message: message ?? "" }),
+      ...(participant.ownerIncarnation ? { ownerIncarnation: participant.ownerIncarnation } : {}),
+    },
     participant.ownerIdentityId,
   );
 };

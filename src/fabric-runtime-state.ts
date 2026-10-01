@@ -584,22 +584,23 @@ export class FabricRuntimeState {
       this.#config.mesh.maxReadEvents,
     );
     const hostId = identity.kind === "main" ? mainAgentId : `runtime:${sessionId}`;
+    this.#control = new FabricControlPlane(this.#mesh, identity, {
+      enabled: this.#config.mesh.enabled,
+      hostId,
+      pollMs: this.#config.mesh.actorPollMs,
+    });
     this.#participants = new ParticipantDirectory(this.#mesh, {
       enabled: this.#config.mesh.enabled,
       hostId,
       rootId: mainAgentId,
       identity,
+      ownerIncarnation: this.#control.incarnation,
       ...(process.env.PI_FABRIC_OWNER_HOST_ID
         ? { selfOwnerHostId: process.env.PI_FABRIC_OWNER_HOST_ID }
         : {}),
       ...(process.env.PI_FABRIC_OWNER_IDENTITY_ID
         ? { selfOwnerIdentityId: process.env.PI_FABRIC_OWNER_IDENTITY_ID }
         : {}),
-    });
-    this.#control = new FabricControlPlane(this.#mesh, identity, {
-      enabled: this.#config.mesh.enabled,
-      hostId,
-      pollMs: this.#config.mesh.actorPollMs,
     });
     await builtins.mesh(this.#config, this.#mesh, identity, this.#participants);
     this.#decisions = this.#config.mesh.enabled ? new DecisionStore(this.#mesh, identity) : undefined;

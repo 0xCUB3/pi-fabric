@@ -10,6 +10,9 @@ const DEFAULT_POLL_MS = 100;
 const DEFAULT_ACK_TIMEOUT_MS = 5_000;
 const DEFAULT_RESULT_TIMEOUT_MS = 60 * 60 * 1_000;
 const MAX_CONTROL_TIMEOUT_MS = 24 * 60 * 60 * 1_000 + 60_000;
+const MAX_INCARNATION_LENGTH = 128;
+export const STALE_INCARNATION_ERROR =
+  "Fabric control command targets a previous owner incarnation; the owner restarted. Re-resolve the participant and retry.";
 
 export type FabricControlOperation = "steer" | "followUp" | "stop" | "ask" | "cancel";
 
@@ -24,6 +27,8 @@ export interface FabricControlCommand {
   triggerTurn?: boolean;
   binding?: FabricActorRunBinding;
   cancelCommandId?: string;
+  /** Owner process incarnation the requester resolved; absent from older senders. */
+  ownerIncarnation?: string;
   requestedAt: number;
   deadlineAt?: number;
   /** The command event's host stamp, copied by the receiving owner; never read from command data. */
@@ -57,6 +62,9 @@ const controlSeenKey = (hostId: string, commandId: string): string =>
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+const isIncarnation = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0 && value.length <= MAX_INCARNATION_LENGTH;
+
 const controlAcceptanceBytes = (acceptance: FabricControlAcceptance): number =>
   Buffer.byteLength(JSON.stringify(acceptance), "utf8");
 
@@ -76,6 +84,7 @@ const commandFromEvent = (event: MeshEvent): FabricControlCommand | undefined =>
     typeof data.requestedAt !== "number" ||
     (data.deadlineAt !== undefined && typeof data.deadlineAt !== "number") ||
     (data.operation === "cancel" && typeof data.cancelCommandId !== "string") ||
+    (data.ownerIncarnation !== undefined && !isIncarnation(data.ownerIncarnation)) ||
     (data.binding !== undefined &&
       (!isObject(data.binding) ||
         (data.binding.model !== undefined && typeof data.binding.model !== "string") ||
@@ -96,6 +105,8 @@ interface FabricControlSeenRecord {
   commandId: string;
   targetId: string;
   expiresAt: number;
+  /** Incarnation that claimed the command; absent on claims by older owners. */
+  ownerIncarnation?: string;
   acceptance?: FabricControlAcceptance;
 }
 
@@ -105,7 +116,8 @@ const controlSeenRecord = (value: unknown): FabricControlSeenRecord | undefined 
     typeof value.hostId !== "string" ||
     typeof value.commandId !== "string" ||
     typeof value.targetId !== "string" ||
-    typeof value.expiresAt !== "number"
+    typeof value.expiresAt !== "number" ||
+    (value.ownerIncarnation !== undefined && !isIncarnation(value.ownerIncarnation))
   ) {
     return undefined;
   }
@@ -124,6 +136,11 @@ export interface FabricControlInput {
   data?: unknown;
   triggerTurn?: boolean;
   binding?: FabricActorRunBinding;
+  /**
+   * The target participant record's `ownerIncarnation`. When set, a restarted
+   * owner refuses the command and acknowledgements from other incarnations are ignored.
+   */
+  ownerIncarnation?: string;
 }
 
 export interface FabricControlRequestOptions {
@@ -138,6 +155,7 @@ interface PendingControlRequest {
   ownerHostId: string;
   ownerIdentityId: string;
   targetId: string;
+  ownerIncarnation?: string;
   commandPublished: boolean;
   cancellationRequested?: boolean;
   signal?: AbortSignal;
@@ -153,6 +171,7 @@ export class FabricControlPlane {
   readonly #activeHandlers = new Set<Promise<void>>();
   readonly #pollMs: number;
   readonly #ackTimeoutMs: number;
+  readonly #incarnation = randomUUID();
   #offset: number;
   #lastSequence: number;
   #timer: NodeJS.Timeout | undefined;
@@ -172,6 +191,11 @@ export class FabricControlPlane {
     // recover unclaimed commands and make interrupted outcomes explicit without re-execution.
     this.#offset = 0;
     this.#lastSequence = 0;
+  }
+
+  /** Random per-instance id; owners stamp it on participant records they publish. */
+  get incarnation(): string {
+    return this.#incarnation;
   }
 
   start(handler: FabricControlHandler): void {
@@ -240,6 +264,9 @@ export class FabricControlPlane {
     }
     if (!ownerHostId.trim()) throw new Error("Remote participant has no execution owner");
     if (options.signal?.aborted) throw new Error(`Remote Fabric request cancelled: ${targetId}`);
+    if (input.ownerIncarnation !== undefined && !isIncarnation(input.ownerIncarnation)) {
+      throw new Error(`Invalid Fabric owner incarnation for ${targetId}`);
+    }
     const timeoutMs = Math.max(
       this.#pollMs * 4,
       Math.min(MAX_CONTROL_TIMEOUT_MS, Math.floor(options.timeoutMs ?? this.#ackTimeoutMs)),
@@ -261,6 +288,9 @@ export class FabricControlPlane {
         ownerHostId,
         ownerIdentityId,
         targetId,
+        ...(input.ownerIncarnation !== undefined
+          ? { ownerIncarnation: input.ownerIncarnation }
+          : {}),
         commandPublished: false,
       };
       pendingRequest = pending;
@@ -296,6 +326,9 @@ export class FabricControlPlane {
           ...(input.data !== undefined ? { data: input.data } : {}),
           ...(input.triggerTurn !== undefined ? { triggerTurn: input.triggerTurn } : {}),
           ...(input.binding !== undefined ? { binding: input.binding } : {}),
+          ...(input.ownerIncarnation !== undefined
+            ? { ownerIncarnation: input.ownerIncarnation }
+            : {}),
           requestedAt,
           deadlineAt: requestedAt + timeoutMs,
         } satisfies FabricControlCommand,
@@ -412,6 +445,17 @@ export class FabricControlPlane {
     ) {
       return;
     }
+    // An ack from another incarnation of the same host is ignored unless it is
+    // that owner's refusal of the incarnation this request targeted.
+    const ackIncarnation = event.data.ownerIncarnation;
+    if (
+      pending.ownerIncarnation !== undefined &&
+      ackIncarnation !== undefined &&
+      ackIncarnation !== pending.ownerIncarnation &&
+      event.data.staleIncarnation !== pending.ownerIncarnation
+    ) {
+      return;
+    }
     this.#clearPending(event.data.commandId);
     pending.resolve({
       accepted: event.data.accepted === true,
@@ -458,8 +502,21 @@ export class FabricControlPlane {
             accepted: false,
             error: "Fabric control outcome is indeterminate after owner restart",
           },
+          duplicate.ownerIncarnation,
         );
       }
+      return;
+    }
+
+    // Claimed commands keep their recorded outcome above. An unclaimed command
+    // addressed to an earlier incarnation of this host is refused, never executed.
+    if (command.ownerIncarnation !== undefined && command.ownerIncarnation !== this.#incarnation) {
+      await this.#publishAcknowledgement(
+        command,
+        { accepted: false, error: STALE_INCARNATION_ERROR },
+        this.#incarnation,
+        command.ownerIncarnation,
+      );
       return;
     }
 
@@ -473,6 +530,7 @@ export class FabricControlPlane {
           commandId: command.commandId,
           targetId: command.targetId,
           expiresAt: deadlineAt + this.#ackTimeoutMs,
+          ownerIncarnation: this.#incarnation,
         } satisfies FabricControlSeenRecord,
         identity: this.identity,
         ifVersion: 0,
@@ -490,6 +548,7 @@ export class FabricControlPlane {
             accepted: false,
             error: "Fabric control outcome is indeterminate after concurrent claim",
           },
+          raced.ownerIncarnation,
         );
       }
       return;
@@ -562,6 +621,7 @@ export class FabricControlPlane {
             commandId: command.commandId,
             targetId: command.targetId,
             expiresAt: Math.max(deadlineAt, Date.now()) + this.#ackTimeoutMs,
+            ownerIncarnation: this.#incarnation,
             acceptance,
           } satisfies FabricControlSeenRecord,
           identity: this.identity,
@@ -627,6 +687,8 @@ export class FabricControlPlane {
   async #publishAcknowledgement(
     command: FabricControlCommand,
     acceptance: FabricControlAcceptance,
+    ownerIncarnation: string | undefined = this.#incarnation,
+    staleIncarnation?: string,
   ): Promise<void> {
     await this.mesh
       .publish({
@@ -644,6 +706,8 @@ export class FabricControlPlane {
             ? { result: acceptance.result }
             : {}),
           ...(acceptance.error ? { error: acceptance.error } : {}),
+          ...(ownerIncarnation !== undefined ? { ownerIncarnation } : {}),
+          ...(staleIncarnation !== undefined ? { staleIncarnation } : {}),
         },
       })
       .catch(() => undefined);

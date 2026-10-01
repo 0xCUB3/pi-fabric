@@ -213,16 +213,17 @@ class ResidentHost {
     this.#agentsPath = path.join(config.residencyRoot, "agents");
     this.#deliveryPrefix = residentDeliveryPrefix(config.rootId);
     this.mesh = new MeshStore(config.meshRoot, config.mesh.maxEventBytes, config.mesh.maxReadEvents);
+    this.control = new FabricControlPlane(this.mesh, this.identity, {
+      enabled: true,
+      hostId: this.hostId,
+      pollMs: config.mesh.actorPollMs,
+    });
     this.participants = new ParticipantDirectory(this.mesh, {
       enabled: true,
       hostId: this.hostId,
       rootId: config.rootId,
       identity: this.identity,
-    });
-    this.control = new FabricControlPlane(this.mesh, this.identity, {
-      enabled: true,
-      hostId: this.hostId,
-      pollMs: config.mesh.actorPollMs,
+      ownerIncarnation: this.control.incarnation,
     });
     if (config.agents.budgetUsd > 0) {
       const budgetFile = path.join(config.residencyRoot, "budget.jsonl");
@@ -556,7 +557,12 @@ class ResidentHost {
       target.ownerHostId,
       target.id,
       subscription.delivery,
-      { message, data: event, triggerTurn: subscription.triggerTurn },
+      {
+        message,
+        data: event,
+        triggerTurn: subscription.triggerTurn,
+        ...(target.ownerIncarnation ? { ownerIncarnation: target.ownerIncarnation } : {}),
+      },
       target.ownerIdentityId,
     );
   }

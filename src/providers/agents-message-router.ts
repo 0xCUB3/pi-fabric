@@ -65,6 +65,7 @@ export class AgentMessageRouter {
           ...(typeof options.triggerTurn === "boolean"
             ? { triggerTurn: options.triggerTurn }
             : {}),
+          ...(participant.ownerIncarnation ? { ownerIncarnation: participant.ownerIncarnation } : {}),
         },
         participant.ownerIdentityId,
       );
@@ -103,6 +104,7 @@ export class AgentMessageRouter {
           ...(typeof options.triggerTurn === "boolean"
             ? { triggerTurn: options.triggerTurn }
             : {}),
+          ...(remoteRoot.ownerIncarnation ? { ownerIncarnation: remoteRoot.ownerIncarnation } : {}),
         },
         remoteRoot.ownerIdentityId,
       );
@@ -165,6 +167,7 @@ export class AgentMessageRouter {
           ? { triggerTurn: options.triggerTurn }
           : {}),
         ...(needsBinding && resolvedBinding ? { binding: resolvedBinding } : {}),
+        ...(participant.ownerIncarnation ? { ownerIncarnation: participant.ownerIncarnation } : {}),
       },
       participant.ownerIdentityId,
     );

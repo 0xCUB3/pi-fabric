@@ -69,6 +69,10 @@ const participantFromEntry = (entry: MeshStateEntry): FabricParticipantRecord | 
     typeof value.ownerHostId !== "string" ||
     typeof value.ownerIdentityId !== "string" ||
     entry.updatedBy.id !== value.ownerIdentityId ||
+    (value.ownerIncarnation !== undefined &&
+      (typeof value.ownerIncarnation !== "string" ||
+        value.ownerIncarnation.length === 0 ||
+        value.ownerIncarnation.length > 128)) ||
     typeof value.name !== "string" ||
     typeof value.status !== "string" ||
     (kind === "provider"
@@ -238,6 +242,8 @@ export interface ParticipantDirectoryOptions {
   identity: MeshIdentity;
   selfOwnerHostId?: string;
   selfOwnerIdentityId?: string;
+  /** This host's control-plane incarnation, stamped on every record it writes. */
+  ownerIncarnation?: string;
   heartbeatMs?: number;
   leaseMs?: number;
 }
@@ -430,6 +436,9 @@ export class ParticipantDirectory implements FabricParticipantSource {
       rootId: this.options.rootId,
       ownerHostId: this.options.selfOwnerHostId ?? this.options.hostId,
       ownerIdentityId: this.options.selfOwnerIdentityId ?? this.options.identity.id,
+      ...(!this.options.selfOwnerHostId && this.options.ownerIncarnation
+        ? { ownerIncarnation: this.options.ownerIncarnation }
+        : {}),
       ...(kind === "root" ? {} : { parentId: this.options.rootId }),
       name: this.options.identity.name,
       status: "running",
@@ -466,6 +475,9 @@ export class ParticipantDirectory implements FabricParticipantSource {
       rootId: main.id,
       ownerHostId: this.options.hostId,
       ownerIdentityId: this.options.identity.id,
+      ...(this.options.ownerIncarnation
+        ? { ownerIncarnation: this.options.ownerIncarnation }
+        : {}),
       name: "main",
       status: main.status === "running" ? "running" : "idle",
       runner: "pi",
@@ -515,13 +527,22 @@ export class ParticipantDirectory implements FabricParticipantSource {
     const desired = new Map<string, FabricParticipantRecord>();
     for (const source of this.#sources) {
       for (const candidate of source()) {
-        const { task: _task, text: _text, error: _error, ...operational } = candidate as
+        const {
+          task: _task,
+          text: _text,
+          error: _error,
+          ownerIncarnation: _incarnation,
+          ...operational
+        } = candidate as
           FabricParticipantRecord & { task?: unknown; text?: unknown; error?: unknown };
         const record: FabricParticipantRecord = {
           ...operational,
           format: 1,
           ownerHostId: this.options.hostId,
           ownerIdentityId: this.options.identity.id,
+          ...(this.options.ownerIncarnation
+            ? { ownerIncarnation: this.options.ownerIncarnation }
+            : {}),
           ...(this.#quiescing ? { capabilities: [] } : {}),
           controlProtocol: "v1",
         };

@@ -974,6 +974,9 @@ export class AgentsProvider implements FabricProvider {
             message,
             ...(args.data === undefined ? {} : { data: args.data }),
             ...(needsBinding ? { binding } : {}),
+            ...(participant.ownerIncarnation
+              ? { ownerIncarnation: participant.ownerIncarnation }
+              : {}),
           },
           participant.ownerIdentityId,
           {
@@ -1397,7 +1400,7 @@ export class AgentsProvider implements FabricProvider {
       participant.ownerHostId,
       participant.id,
       "stop",
-      {},
+      participant.ownerIncarnation ? { ownerIncarnation: participant.ownerIncarnation } : {},
       participant.ownerIdentityId,
     );
     if (this.residency?.hasAgent(id)) this.residency.acknowledgeCompletion(id);

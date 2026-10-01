@@ -72,6 +72,17 @@ with no durable participant, do not keep the host running; Fabric adds no system
 daemon, so such a schedule is released the next time any Fabric process touches
 the mesh root.
 
+### Stale commands after restart
+
+A restarted host keeps its `residentHostId(rootId)` and replays the control log
+from offset 0, so a stop or ask meant for the previous process could otherwise
+reach a durable actor's next turn. Each host process publishes its participant
+records with a fresh `ownerIncarnation`, and requesters stamp that value on each
+command. The new host refuses an unclaimed command for an earlier incarnation
+with an immediate rejection and does not execute it; the caller re-resolves the
+participant and decides whether to resend. See
+[stale commands after restart](agents.md#stale-commands-after-restart).
+
 ## Containers and PID namespaces
 
 `kill(pid, 0)` only answers within the caller's PID namespace and boot. In a

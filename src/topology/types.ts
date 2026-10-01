@@ -22,6 +22,12 @@ export interface FabricParticipantRecord {
   rootId: string;
   ownerHostId: string;
   ownerIdentityId: string;
+  /**
+   * Control-plane incarnation of the owner process that wrote this record.
+   * Requesters copy it onto control commands so a restarted owner can refuse
+   * commands meant for its previous process. Absent on older records.
+   */
+  ownerIncarnation?: string;
   parentId?: string;
   name: string;
   /**
