@@ -2,6 +2,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import crossSpawn from "cross-spawn";
 import { StringDecoder } from "node:string_decoder";
@@ -293,6 +294,12 @@ const main = async (): Promise<void> => {
   else piArguments.push("--no-session");
   if (!options.extensions) piArguments.push("--no-extensions");
   if (options.fabricExtensionPath) piArguments.push("-e", options.fabricExtensionPath);
+  if (options.writePolicy) {
+    // The guard loads even with --no-extensions; other runners cannot enforce it.
+    if (options.runner !== "pi") throw new Error(`Write confinement requires the Pi runner, not ${options.runner}`);
+    const guard = import.meta.url.endsWith(".ts") ? "./agents/write-guard.ts" : "./agents/write-guard.js";
+    piArguments.push("-e", fileURLToPath(new URL(guard, import.meta.url)));
+  }
   if (options.tools.length > 0) piArguments.push("--tools", options.tools.join(","));
   else piArguments.push("--no-tools"); // explicit empty allowlist => no tools, not Pi defaults
   if (options.model) piArguments.push("--model", options.model);
@@ -379,6 +386,9 @@ const main = async (): Promise<void> => {
         ? { PI_FABRIC_OWNER_IDENTITY_ID: options.ownerIdentityId }
         : {}),
       ...(options.runRoot ? { PI_FABRIC_RUN_ROOT: options.runRoot } : {}),
+      // Supported child contract (docs/agents.md "Child environment contract").
+      ...(options.lineage ? { PI_FABRIC_LINEAGE: options.lineage } : {}),
+      ...(options.writePolicy ? { PI_FABRIC_WRITE_POLICY: options.writePolicy } : {}),
     },
     stdio: ["pipe", "pipe", "pipe"],
   });

@@ -9,6 +9,7 @@ import type { ThinkingTransferInput } from "./thinking-transfer.js";
 import type { FabricThinking, FabricThinkingBounds } from "../thinking.js";
 import type { FabricParticipantResidency } from "../topology/types.js";
 import type { InheritedSessionPin } from "./session-pins.js";
+import type { AgentWorktreeResult } from "./worktree-manager.js";
 
 export type AgentRunStatus =
   | "queued"
@@ -63,6 +64,12 @@ export interface AgentRunRequest {
   /** Leaf or recursive execution cwd; relative to the immediate caller, independent of project/mesh lineage. */
   cwd?: string;
   worktree?: boolean;
+  /** Shell command run in a new worktree before launch; overrides agents.worktree.setup. */
+  worktreeSetup?: string;
+  /** Write confinement enforced in the Pi child; see child-env.ts. */
+  readOnly?: boolean;
+  writableRoots?: string[];
+  shell?: "deny" | "unconfined";
   residency?: FabricParticipantResidency;
   schema?: Record<string, unknown>;
   systemPrompt?: string;
@@ -83,6 +90,14 @@ export interface AgentRunRequest {
   handoffCompact?: HandoffCompactionRequest;
   /** Host-only parent /switch-account pins; not a model argument. */
   inheritedSessionPins?: InheritedSessionPin[];
+  /** Host-created fork of the caller branch ending at its last completed turn (seed: "branch"). */
+  forkSeed?: AgentForkSeed;
+}
+
+export interface AgentForkSeed {
+  sourceSessionId: string;
+  sourceSessionFile?: string;
+  sourceBranch: SessionEntry[];
 }
 
 export interface AgentUsage {
@@ -156,6 +171,8 @@ export interface AgentRunRecord {
   nestedAgents?: AgentRunRecord[];
   pendingMessages?: { steering: string[]; followUp: string[] };
   compaction?: AgentCompactionStatus;
+  /** Settlement diff summary of a worktree: true run; `worktree` stays the path. */
+  worktreeResult?: AgentWorktreeResult;
 }
 
 export interface AgentRunResult extends AgentRunRecord {
@@ -243,6 +260,10 @@ export interface AgentWorkerOptions {
   worktree?: string;
   inheritedSessionPins?: InheritedSessionPin[];
   carryOver?: AgentRunCarryOver;
+  /** Serialized PI_FABRIC_WRITE_POLICY; Pi children also load the write guard. */
+  writePolicy?: string;
+  /** Serialized PI_FABRIC_LINEAGE. */
+  lineage?: string;
 }
 
 /**

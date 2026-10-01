@@ -110,6 +110,8 @@ export const parseWorkerOptions = (
   const steerFile = optional(args, "steer-file");
   const branch = optional(args, "branch");
   const worktree = optional(args, "worktree");
+  const writePolicy = optional(args, "write-policy");
+  const lineage = optional(args, "lineage");
   const maxTokens = optional(args, "max-tokens");
   const carryOverSource = optional(args, "carry-over");
   const runnerSessionId = optional(args, "runner-session-id");
@@ -207,6 +209,8 @@ export const parseWorkerOptions = (
     ...(steerFile ? { steerFile } : {}),
     ...(branch ? { branch } : {}),
     ...(worktree ? { worktree } : {}),
+    ...(writePolicy ? { writePolicy } : {}),
+    ...(lineage ? { lineage } : {}),
     ...(maxTokens ? { maxTokens: Number(maxTokens) } : {}),
     ...(carryOver ? { carryOver } : {}),
     ...(inheritedSessionPins && inheritedSessionPins.length > 0 ? { inheritedSessionPins } : {}),

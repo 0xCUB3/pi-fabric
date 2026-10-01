@@ -200,6 +200,31 @@ This fallback is available once per executor run, with a persisted receipt that 
 
 **Trajectory compaction.** Set `compact` to give the executor a compacted transcript in place of the full raw branch. A value of `true` applies the default summary. Use `{ instructions?, preserve? }` to add compaction instructions of up to 8K characters and as many as 16 explicit preserve facts of up to 2K characters each. These limits match `compact.request`. Fabric budgets the complete inherited context, including the finalized outer `fabric_exec` result and any thinking-transfer digest, before appending the compaction marker. The executor sees the projected summary plus a bounded, tool-pair-safe raw tail; an oversized outer call/result pair is summarized together to avoid leaving an orphan result. When available, the destination model window and its Pi compaction settings apply, including trusted project/model overrides. Source-model usage is not treated as destination calibration. Without model metadata, the raw tail is still bounded (20K estimated tokens by default). The append-only child file retains the full raw trajectory. Fabric records the successful outcome under `compaction` in the child's `pi-fabric-handoff` custom entry, including sections, tokens, and cut point. If requested compaction cannot produce a valid result, the handoff fails; the unbounded fork is never silently launched. Omit `compact` to keep the fork verbatim.
 
+### Context-inheriting spawn
+
+`agents.run()` and `agents.spawn()` accept `seed: "task" | "branch" | "snippet"` for Pi children. The default `"task"` keeps the historical behavior: the child receives the task alone. Other runners fail before launch when `seed` is not `"task"`.
+
+`seed: "branch"` starts the child from a copy of the caller's current session branch, with the task appended as a new user turn. Unlike `agents.handoff()`, it never blocks Main or waits for the `fabric_exec` boundary; the caller keeps running and can `wait` later. The copy ends at the caller's last completed turn: Fabric drops the in-flight assistant turn that holds the outer `fabric_exec` call (the newest assistant entry after the latest user message with an unresolved tool call), so the child never sees a dangling tool call. Fabric materializes the copy with the same session machinery as handoff, applies thinking transfer when the child model's reasoning channel differs, and records a `pi-fabric-fork` custom entry with `boundary: "last_completed_turn"`. The seed works with `worktree: true`. Durable `agents.spawn()` refuses `seed: "branch"` because the resident host accepts no session seeds; use `"snippet"` there.
+
+`seed: "snippet"` prefixes the task with the last `seedMessages` user and assistant messages (1 to 50, default 12) inside an `<inherited-conversation>` block. Only text survives: tool calls, tool results, thinking, and images are dropped, and each message is truncated to 4,000 characters. The cut is deterministic and works with durable residency.
+
+A supervised fork pairs a mailbox actor with a branch-seeded worker. The worker inherits the conversation; the supervisor reviews each result:
+
+```ts
+const supervisor = await agents.create({
+  name: "fork-supervisor",
+  instructions: "Review a worker result. Reply APPROVE or a concrete correction.",
+});
+let task = "Implement the plan we just agreed on.";
+for (let round = 0; round < 3; round++) {
+  const worker = await agents.run({ task, seed: "branch", worktree: true });
+  const verdict = await agents.ask({ id: supervisor.id, message: worker.text, data: worker.worktreeResult });
+  if (verdict.text?.includes("APPROVE")) return worker;
+  task = `Revise the previous attempt in a fresh fork: ${verdict.text}`;
+}
+return "Supervisor did not approve after 3 rounds";
+```
+
 ### Automatic Fabric-boundary prewalk
 
 `/fabric prewalk` adapts Can Bölük's [Prewalk research](https://stencil.so/blog/prewalk) for Fabric. OMP changes models inside one live agent loop at the first edit or write that a todo gates. Fabric uses a coarser atomic boundary. The first successful monitored mutation marks the current outer `fabric_exec`. All remaining nested calls settle before prewalk continues. This behavior preserves programmable sequential and parallel Fabric semantics.
@@ -327,6 +352,34 @@ localterm start
 `/fabric agents` lists the children. Run `/fabric attach <id>` to show the correct attach command. A caller abort stops a run that never produced progress and detaches a run that already did: the child keeps working to its own terminal state and reports it, so a returned program or a cancelled tool call cannot discard a long participant's work. A worker that catches an external signal mid-run, or whose transport dies after doing work, is resumed, so an interruption the run can recover from never becomes a terminal stop. The manager relaunches the same run in the same directory, hands the child a continuation of the task, keeps the stopped attempt's turns and token usage in the run record, and emits `run.resumed`. An explicit stop, a run deadline, and the `agents.maxTokensPerChild` limit stay terminal. Three resumes bound one run, and the run deadline covers every attempt. When a program uses orchestration entry points such as `agent`/`workflow.agent`, `agents.run`/`agents.wait`/`agents.ask`, `council.run`, or `rlm.query`, Fabric increases the whole-program `executor.timeoutMs` to at least `agents.timeoutMs`. The same increase applies to `agents.*` refs called through `tools.call()` and to refs calculated at runtime. The parent deadline then cannot stop a child that remains within its own agent budget.
 
 Set `worktree: true` to create a dedicated Git worktree and a `pi-fabric/<name>-<id>` branch from the repository containing the selected `cwd`. Fabric writes that worktree at `<repo>/.pi/fabric/worktrees/<id>` so copy-on-write cloning can keep ignored build artifacts on the same volume, and it records the path in the repository `.git/info/exclude` file. Simple `git worktree add` commands run through `pi.bash` take the same clone-first path. Fabric retains worktrees for inspection until you call `agents.cleanup()`. When the selected cwd is a repository subdirectory, Fabric uses the matching subdirectory in the generated worktree when it exists; otherwise it uses the worktree root. The reported effective cwd is the generated worktree path, and Pi evaluates that generated path as its own canonical cwd. The caller's project and mesh roots remain unchanged, so a child targeting another repository still belongs to the orchestrating Fabric topology. A recursive child in a worktree stays in the same participant directory and does not create another `.pi/fabric/mesh` inside that worktree.
+
+At settlement, a `worktree: true` result and status carry `worktreeResult: { path, branch?, baseRef?, changedFiles, diffstat: { files, insertions, deletions }, kept, diffError? }` beside the existing `worktree` path string. `baseRef` is the commit the branch started from. `changedFiles` is the sorted union of tracked changes against `baseRef` (committed or not) and untracked, non-ignored files, capped at 500 entries; `diffstat.files` counts all of them. Untracked text files up to 1 MiB count their lines as insertions. Fabric computes the summary with two bounded Git calls (15 second timeout each); a Git failure leaves the counts at zero and sets `diffError`. `kept` reports whether the worktree still exists; worktrees stay until `agents.cleanup()`.
+
+Set `agents.worktree.setup` in [configuration](configuration.md#agents) or `worktreeSetup` on one request (which wins) to run a shell command in the new worktree root before the child starts, for example `"bun install --frozen-lockfile"`. The command runs through `/bin/sh -c` (`cmd /c` on Windows) with a 10 minute limit. A non-zero exit or timeout fails the launch with the last 2,000 characters of output and removes the worktree and its branch.
+
+### Write confinement
+
+`agents.run()` and `agents.spawn()` accept `readOnly?: boolean`, `writableRoots?: string[]`, and `shell?: "deny" | "unconfined"` for Pi children. Setting any of them creates a write policy:
+
+- `readOnly: true` refuses every `write` and `edit`.
+- `writableRoots` (at most 32) resolve against the child's cwd, including a generated worktree. Omitted roots default to that cwd. A root must exist or be creatable inside the cwd; Fabric creates missing ones. `write` and `edit` outside the roots fail. Fabric checks the lexical absolute path and the real path of the nearest existing ancestor, so a symlink cannot escape a root, and an unresolvable path fails closed.
+- `bash` and `powershell` are refused under any write policy unless the request sets `shell: "unconfined"`. Fabric does not parse shell commands: an unconfined shell can write anywhere the process can, so it is not a sandbox.
+
+The child Pi process enforces the policy. The worker passes it as `PI_FABRIC_WRITE_POLICY` and loads a small guard extension with `-e`, so it applies even with `extensions: false`. The guard blocks top-level tool calls through Pi's `tool_call` hook and nested `pi.write`, `pi.edit`, and `pi.bash` calls inside `fabric_exec`. It covers tools named `write`, `edit`, `bash`, and `powershell`, including captured overrides with those names; other extension tools and MCP servers are outside it. Native Fabric executors (CPython, `node-process`, `bun-process`) run outside the hook: a confined launch that would use one fails before launch, and a confined child refuses to run one, unless `shell: "unconfined"`. QuickJS and Monty stay available.
+
+Confinement is inherited and only narrows. A confined agent's own children inherit its policy when they request none; an explicit request must keep `readOnly`, cannot switch to `shell: "unconfined"`, and must name roots inside the caller's roots. Claude and Veda runners fail before launch under any policy because Fabric cannot enforce it there. A confined agent cannot start durable agents or actors, since the shared resident host does not inherit its confinement.
+
+### Child environment contract
+
+Fabric children may read these environment variables. They are stable and versioned where noted; every other `PI_FABRIC_*` variable is internal and may change.
+
+| Variable | Contents |
+| --- | --- |
+| `PI_FABRIC_LINEAGE` | JSON `{ version: 1, rootSessionId, parentSessionId?, parentRunId?, runId, depth, childIndex, worker: true }`. `childIndex` is the launch ordinal within the parent process. `agents.self()` adds the same object as `lineage` inside a child. |
+| `PI_FABRIC_WRITE_POLICY` | JSON `{ readOnly, writableRoots, shell }` with canonical absolute roots. Present only for confined children. Malformed values fail closed to read-only with shell denied. |
+| `PI_FABRIC_THINKING_BOUNDS` | JSON `{ min?, max? }` thinking bounds; see [thinking](thinking.md). |
+| `PI_FABRIC_DEPTH` | Recursion depth of the child (the root is 0). |
+| `PI_FABRIC_AGENT_NAME` | The child's display name. |
 
 [Model-guidance components](components.md#model-facing-guidance-components) can target participants by canonical provider/model. Direct agents and actors retain their role prompt and receive matching append guidance after it. Recursive Pi children load the project components and resolve their own replaceable Fabric execution slot, so the parent does not duplicate guidance. Durable owners use the latest atomically committed guidance snapshot for each launch. Guidance changes prompts only; it cannot widen tools, approvals, or committed capabilities. Task text, message envelopes, run IDs, and timestamps stay out of the guidance system prompt, so repeated runs with the same role, model, and component projection retain a byte-stable prefix.
 

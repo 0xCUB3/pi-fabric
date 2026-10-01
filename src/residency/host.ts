@@ -617,6 +617,7 @@ class ResidentHost {
       if (command.operation === "spawn") {
         if (
           command.request.sessionSeed ||
+          command.request.forkSeed ||
           command.request.sessionFile ||
           command.request.actorId ||
           command.request.actorName ||

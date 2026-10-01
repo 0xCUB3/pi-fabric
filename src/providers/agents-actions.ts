@@ -59,6 +59,29 @@ const runProperties = {
     description: "Filesystem execution directory for leaf or recursive Pi runs; relative paths resolve from the caller cwd. Does not change project/mesh ownership or grant target project trust.",
   },
   worktree: { type: "boolean" },
+  worktreeSetup: {
+    type: "string",
+    maxLength: 8192,
+    description: "Shell command run in a new worktree before the child starts; overrides agents.worktree.setup. Non-zero exit fails the run.",
+  },
+  seed: {
+    type: "string",
+    enum: ["task", "branch", "snippet"],
+    description: "Child context (Pi only). task (default): the task alone. branch: a non-blocking fork of this conversation up to its last completed turn, then the task. snippet: the last seedMessages user/assistant texts prefixed to the task.",
+  },
+  seedMessages: { type: "integer", minimum: 1, maximum: 50, description: "snippet only; default 12" },
+  readOnly: { type: "boolean", description: "Pi only: refuse write/edit (and shell unless shell: \"unconfined\") in the child" },
+  writableRoots: {
+    type: "array",
+    items: { type: "string", maxLength: 4096 },
+    maxItems: 32,
+    description: "Pi only: confine write/edit to these directories (relative to the child cwd; default the cwd). Shell is refused unless shell: \"unconfined\".",
+  },
+  shell: {
+    type: "string",
+    enum: ["deny", "unconfined"],
+    description: "With a write policy, bash is refused by default; unconfined allows it and is not a sandbox",
+  },
   schema: { type: "object", description: "Optional JSON Schema for validated structured output" },
   systemPrompt: {
     type: "string",

@@ -76,6 +76,11 @@ export const normalizeAgentRunRequest = (
     ...(typeof args.recursive === "boolean" ? { recursive: args.recursive } : {}),
     ...(options.allowCwd !== false && typeof args.cwd === "string" ? { cwd: args.cwd } : {}),
     ...(typeof args.worktree === "boolean" ? { worktree: args.worktree } : {}),
+    ...(args.worktreeSetup !== undefined ? { worktreeSetup: args.worktreeSetup as string } : {}),
+    // Shapes are checked fail-closed by the manager before launch.
+    ...(args.readOnly !== undefined ? { readOnly: args.readOnly as boolean } : {}),
+    ...(args.writableRoots !== undefined ? { writableRoots: args.writableRoots as string[] } : {}),
+    ...(args.shell !== undefined ? { shell: args.shell as "deny" | "unconfined" } : {}),
     ...(args.residency === "session" || args.residency === "durable"
       ? { residency: args.residency }
       : {}),

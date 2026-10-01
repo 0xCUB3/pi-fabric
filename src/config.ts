@@ -211,6 +211,8 @@ export interface FabricAgentConfig {
   sessionExportDir: string;
   /** Admission policy for the model a child process actually reports. */
   modelAdmission: FabricModelAdmission;
+  /** Shell command run in each new agent worktree before the child starts. */
+  worktree?: { setup?: string };
 }
 
 export interface FabricToolCaptureConfig {
@@ -1191,6 +1193,9 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
         agents.modelAdmission,
         DEFAULT_FABRIC_CONFIG.agents.modelAdmission,
       ),
+      ...(stringValue(objectValue(agents.worktree).setup)
+        ? { worktree: { setup: String(objectValue(agents.worktree).setup).trim() } }
+        : {}),
     },
     jev: normalizeJevConfig(input.jev),
     components: configuredComponents.map((entry) => structuredClone(entry)),

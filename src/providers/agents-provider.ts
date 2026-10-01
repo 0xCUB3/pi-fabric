@@ -48,6 +48,8 @@ import {
   AgentManager,
 } from "../agents/manager.js";
 import { checkedHandoffCompaction } from "../agents/handoff.js";
+import { checkedSeed, completedBranchPrefix, snippetTask } from "../agents/fork-seed.js";
+import { readAgentLineage } from "../agents/child-env.js";
 import { withInheritedSessionPins } from "../agents/session-pins.js";
 import type {
   AgentHandleInfo,
@@ -580,7 +582,11 @@ export class AgentsProvider implements FabricProvider {
     switch (actionName) {
       case "run": {
         const handle = await this.manager.spawn(
-          runRequest(this.#resolvePiModelArgs(args, context), context, this.manager, this.modelsConfig()),
+          this.#applySeed(
+            args,
+            runRequest(this.#resolvePiModelArgs(args, context), context, this.manager, this.modelsConfig()),
+            context,
+          ),
           context.signal,
         );
         this.participants.scheduleRefresh();
@@ -602,7 +608,12 @@ export class AgentsProvider implements FabricProvider {
       case "handoff":
         return this.handoff(args, context);
       case "spawn": {
-        const request = runRequest(this.#resolvePiModelArgs(args, context), context, this.manager, this.modelsConfig());
+        const request = this.#applySeed(
+          args,
+          runRequest(this.#resolvePiModelArgs(args, context), context, this.manager, this.modelsConfig()),
+          context,
+        );
+        if (request.residency === "durable") this.#assertUnconfinedDurable();
         const kernel = this.manager.resolveKernel(request);
         const { kernel: _requestedKernel, ...baseRequest } = request;
         const durableRequest = withInheritedSessionPins({
@@ -697,8 +708,11 @@ export class AgentsProvider implements FabricProvider {
           ...(args.includeStale === true ? { includeStale: true } : {}),
         });
       }
-      case "self":
-        return this.participants.self();
+      case "self": {
+        const self = await this.participants.self();
+        const lineage = readAgentLineage();
+        return lineage ? { ...self, lineage } : self;
+      }
       case "main":
         return this.mainAgent.info(context.extensionContext);
       case "sessions":
@@ -1185,6 +1199,7 @@ export class AgentsProvider implements FabricProvider {
       ...(kernel ? { kernel, pythonRuntime: this.manager.resolvePythonRuntime(request.pythonRuntime) } : {}),
     };
     if (request.residency !== "durable") return this.actorManager.create(request);
+    this.#assertUnconfinedDurable();
     if (!this.residency) return this.#residentActorClient().createActor(request);
 
     await this.residency.ensureHost();
@@ -1197,6 +1212,51 @@ export class AgentsProvider implements FabricProvider {
     }
     await this.#activateDurableActor(actor);
     return actor;
+  }
+
+  // The shared resident host cannot inherit this process's write confinement.
+  #assertUnconfinedDurable(): void {
+    if (process.env.PI_FABRIC_WRITE_POLICY) {
+      throw new Error("A write-confined agent cannot start durable agents or actors");
+    }
+  }
+
+  /** seed: "branch" forks the caller's completed turns; "snippet" prefixes recent text. */
+  #applySeed(
+    args: Record<string, unknown>,
+    request: AgentRunRequest,
+    context: FabricInvocationContext,
+  ): AgentRunRequest {
+    const { seed, seedMessages } = checkedSeed(args.seed, args.seedMessages);
+    if (seed === "task") return request;
+    if ((request.runner ?? this.manager.config.runner) !== "pi") {
+      throw new Error(`seed: "${seed}" requires the Pi runner`);
+    }
+    const session = context.extensionContext.sessionManager;
+    const branch = session?.getBranch?.();
+    if (!session || !branch) throw new Error(`seed: "${seed}" requires a Pi session`);
+    if (seed === "snippet") return { ...request, task: snippetTask(branch, seedMessages, request.task) };
+    if (request.residency === "durable") {
+      throw new Error('seed: "branch" is unavailable for durable agents; use seed: "snippet"');
+    }
+    const model = context.extensionContext.model;
+    const sourceSessionFile = session.getSessionFile?.();
+    const thinkingTransfer = request.model
+      ? resolveThinkingTransfer(
+          context.extensionContext,
+          request.model,
+          model ? { provider: model.provider, modelId: model.id } : undefined,
+        )
+      : undefined;
+    return {
+      ...request,
+      forkSeed: {
+        sourceSessionId: session.getSessionId(),
+        ...(sourceSessionFile ? { sourceSessionFile } : {}),
+        sourceBranch: completedBranchPrefix(branch),
+      },
+      ...(thinkingTransfer ? { thinkingTransfer } : {}),
+    };
   }
 
   #residentActorClient(): ResidentActorClient {

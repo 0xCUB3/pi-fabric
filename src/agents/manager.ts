@@ -60,8 +60,17 @@ import type {
   AgentTransportLaunch,
   AgentUsage,
 } from "./types.js";
-import { WorktreeManager } from "./worktree-manager.js";
-import { writeHandoffSession } from "./handoff.js";
+import { WorktreeManager, type AgentWorktreeResult } from "./worktree-manager.js";
+import { writeForkSession, writeHandoffSession } from "./handoff.js";
+import {
+  checkWritePolicyRequest,
+  readAgentLineage,
+  readWritePolicy,
+  requestsWritePolicy,
+  resolveChildWritePolicy,
+  type FabricAgentLineage,
+  type FabricWritePolicy,
+} from "./child-env.js";
 import type { FabricCompactionBudget } from "../compaction/hook.js";
 import {
   activeBudgetState,
@@ -195,6 +204,7 @@ interface ManagedAgent extends AgentLifecycleState<AgentRunResult> {
   runnerSessionId?: string;
   branch?: string;
   worktree?: string;
+  worktreeResult?: AgentWorktreeResult;
   nestedSnapshot?: AgentRunRecord[];
   nestedSnapshotAt?: number;
   latestRecord?: AgentRunRecord;
@@ -421,6 +431,7 @@ const failedRecord = (
     ...(managed.transport.attachCommand ? { attachCommand: managed.transport.attachCommand } : {}),
     ...(managed.branch ? { branch: managed.branch } : {}),
     ...(managed.worktree ? { worktree: managed.worktree } : {}),
+    ...(managed.worktreeResult ? { worktreeResult: managed.worktreeResult } : {}),
   };
 };
 
@@ -459,6 +470,12 @@ export class AgentManager {
   readonly #resolveParticipantGuidance: AgentParticipantGuidanceResolver | undefined;
   readonly #resolveInheritedSessionPins: (() => InheritedSessionPin[] | undefined) | undefined;
   readonly #thinkingBounds: (() => FabricThinkingBounds) | undefined;
+  readonly #sessionId: (() => string | undefined) | undefined;
+  readonly #executorRuntime: (() => string | undefined) | undefined;
+  /** This process's own confinement; children may only narrow it. */
+  readonly #parentWritePolicy: FabricWritePolicy | undefined = readWritePolicy();
+  readonly #parentLineage: FabricAgentLineage | undefined = readAgentLineage();
+  #childIndex = 0;
   readonly #piModelPreparations = new Map<string, Promise<string | undefined>>();
   readonly #budget: BudgetLedgerState | undefined;
   readonly #budgetOwned: boolean;
@@ -507,6 +524,10 @@ export class AgentManager {
       resolveInheritedSessionPins?: () => InheritedSessionPin[] | undefined;
       /** Caller's effective thinking bounds (config narrowed by inherited env). */
       thinkingBounds?: () => FabricThinkingBounds;
+      /** Caller Pi session id recorded as lineage parentSessionId. */
+      sessionId?: () => string | undefined;
+      /** Caller TypeScript executor runtime; native runtimes escape write confinement. */
+      executorRuntime?: () => string | undefined;
     } = {},
   ) {
     this.#semaphore = new AgentAdmission(config.maxConcurrent, Infinity, config.maxDepth);
@@ -531,6 +552,8 @@ export class AgentManager {
     this.#resolveParticipantGuidance = options.resolveParticipantGuidance;
     this.#resolveInheritedSessionPins = options.resolveInheritedSessionPins;
     this.#thinkingBounds = options.thinkingBounds;
+    this.#sessionId = options.sessionId;
+    this.#executorRuntime = options.executorRuntime;
     this.#currentDepth = Math.max(0, Number(process.env.PI_FABRIC_DEPTH ?? "0") || 0);
     this.#fullCodeMode = options.fullCodeMode ?? true;
     this.#kernel = options.kernel ?? (() => "typescript");
@@ -710,6 +733,29 @@ export class AgentManager {
     if (request.sessionSeed && request.sessionFile) {
       throw new Error("A agent request cannot combine sessionSeed with sessionFile");
     }
+    if (request.forkSeed && (runner !== "pi" || request.sessionSeed || request.sessionFile)) {
+      throw new Error('seed: "branch" requires the Pi runner and no other session seed');
+    }
+    // Write confinement is enforced by the Pi child's tool_call guard only.
+    if (requestsWritePolicy(request)) checkWritePolicyRequest(request);
+    const confined = requestsWritePolicy(request) || this.#parentWritePolicy !== undefined;
+    if (confined && runner !== "pi") {
+      throw new Error(`Write confinement (readOnly, writableRoots, shell) is enforced only by the Pi runner, not ${runner}`);
+    }
+    if (
+      confined &&
+      (request.shell ?? this.#parentWritePolicy?.shell ?? "deny") !== "unconfined" &&
+      ((kernel === "python" && pythonRuntime === "cpython") ||
+        (kernel === "typescript" && /^(node|bun)-process$/.test(this.#executorRuntime?.() ?? "")))
+    ) {
+      throw new Error(
+        'A confined agent cannot use a native Fabric executor (CPython, node-process, bun-process); use QuickJS/Monty or shell: "unconfined"',
+      );
+    }
+    const worktreeSetup = request.worktree ? request.worktreeSetup ?? this.config.worktree?.setup : undefined;
+    if (worktreeSetup !== undefined && (typeof worktreeSetup !== "string" || worktreeSetup.length > 8_192)) {
+      throw new Error("worktreeSetup must be a shell command of at most 8192 characters");
+    }
     // Fail closed before admission or budget side effects.
     const thinkingBounds = this.childThinkingBounds(request.thinkingBounds);
     const requiresFabricKernel = kernel === "python" || request.kernel === "typescript";
@@ -791,7 +837,25 @@ export class AgentManager {
     }
 
     try {
-      const sessionFile = request.sessionSeed
+      if (worktree && worktreeSetup?.trim()) await this.#worktrees.setup(id, worktreeSetup);
+      const writePolicy = runner === "pi"
+        ? resolveChildWritePolicy(request, this.#parentWritePolicy, agentCwd)
+        : undefined;
+      const parentSessionId = this.#sessionId?.();
+      const parentRunId = this.#parentLineage?.runId ?? (this.#currentDepth > 0 ? process.env.PI_FABRIC_PARENT_RUN : undefined);
+      const lineage: FabricAgentLineage = {
+        version: 1,
+        rootSessionId: this.#parentLineage?.rootSessionId ?? this.#fabricSessionId ?? parentSessionId ?? "",
+        ...(parentSessionId ? { parentSessionId } : {}),
+        ...(parentRunId ? { parentRunId } : {}),
+        runId: id,
+        depth: this.#currentDepth + 1,
+        childIndex: this.#childIndex++,
+        worker: true,
+      };
+      const sessionFile = request.forkSeed
+        ? writeForkSession(request.forkSeed, agentCwd, path.join(runDirectory, "fork-session"), request.thinkingTransfer)
+        : request.sessionSeed
         ? writeHandoffSession(
             request.sessionSeed,
             agentCwd,
@@ -924,6 +988,9 @@ export class AgentManager {
         ...(schemaFile ? ["--schema-file", schemaFile] : []),
         ...(branch ? ["--branch", branch] : []),
         ...(worktree ? ["--worktree", worktree] : []),
+        ...(writePolicy ? ["--write-policy", JSON.stringify(writePolicy)] : []),
+        "--lineage",
+        JSON.stringify(lineage),
       ];
       const launch: AgentTransportLaunch = {
         id,
@@ -1169,6 +1236,7 @@ export class AgentManager {
     const existing = readRecord(managed.statusFile);
     if (existing && terminalStatuses.has(existing.status)) {
       const result = this.#withTransportMetadata(existing, managed) as AgentRunResult;
+      await this.#captureWorktree(managed);
       this.#settle(managed, result);
       return result;
     }
@@ -1180,6 +1248,7 @@ export class AgentManager {
         ? (this.#withTransportMetadata(terminal, managed) as AgentRunResult)
         : failedRecord(managed, "stopped", "Agent stopped");
     if (!terminal || !terminalStatuses.has(terminal.status)) writeRecord(managed.statusFile, record);
+    await this.#captureWorktree(managed);
     this.#settle(managed, record);
     return record;
   }
@@ -1554,6 +1623,7 @@ export class AgentManager {
       if (record && terminalStatuses.has(record.status)) {
         if (await this.#resumeStopped(managed, record, deadline)) continue;
         if (await this.#retryStartup(managed, record, deadline)) continue;
+        await this.#captureWorktree(managed);
         this.#settle(managed, this.#withTransportMetadata(record, managed) as AgentRunResult);
         return;
       }
@@ -1566,6 +1636,7 @@ export class AgentManager {
           terminalStatuses.has(completed.status) &&
           completed.status !== "stopped"
         ) {
+          await this.#captureWorktree(managed);
           this.#settle(
             managed,
             this.#withTransportMetadata(completed, managed) as AgentRunResult,
@@ -1575,6 +1646,7 @@ export class AgentManager {
         if (managed.lastRetriedTransportFailure) {
           // The deadline fired mid-retry: the root cause is the dead transport
           // we were recovering from, not runaway wall time. Report that failure.
+          await this.#captureWorktree(managed);
           this.#settle(
             managed,
             this.#withTransportMetadata(
@@ -1590,6 +1662,7 @@ export class AgentManager {
           `Agent timed out after ${timeoutMs}ms`,
         );
         writeRecord(managed.statusFile, timedOut);
+        await this.#captureWorktree(managed);
         this.#settle(managed, timedOut);
         return;
       }
@@ -1616,6 +1689,7 @@ export class AgentManager {
               continue;
             }
             writeRecord(managed.statusFile, failed);
+            await this.#captureWorktree(managed);
             this.#settle(managed, failed);
             return;
           }
@@ -1627,8 +1701,17 @@ export class AgentManager {
     }
   }
 
+  /** Bounded worktree diff, captured once before settlement. */
+  async #captureWorktree(managed: ManagedAgent): Promise<void> {
+    if (!managed.worktree || managed.worktreeResult || managed.settled) return;
+    // summarize() reports git failures as diffError; anything else leaves the result unset.
+    const summary = await this.#worktrees.summarize(managed.id).catch(() => undefined);
+    if (summary) managed.worktreeResult = summary;
+  }
+
   #settle(managed: ManagedAgent, result: AgentRunResult): void {
     if (managed.settled) return;
+    if (managed.worktreeResult) result.worktreeResult = managed.worktreeResult;
     this.#drainLifecycle(managed);
     if (!beginAgentSettlement(managed)) return;
     // Images are transport inputs, not retained run artifacts. Startup retries
@@ -1971,6 +2054,7 @@ export class AgentManager {
         : {}),
       ...(managed.branch ? { branch: managed.branch } : {}),
       ...(managed.worktree ? { worktree: managed.worktree } : {}),
+      ...(managed.worktreeResult ? { worktreeResult: managed.worktreeResult } : {}),
     };
   }
 }

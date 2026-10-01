@@ -652,6 +652,8 @@ export class FabricRuntimeState {
       resolveInheritedSessionPins: () =>
         resolveInheritedSessionPins(context.sessionManager?.getEntries?.() ?? []),
       thinkingBounds: () => this.#config?.thinking?.bounds ?? {},
+      sessionId: () => context.sessionManager?.getSessionId?.(),
+      executorRuntime: () => this.#config?.schema.mode === "enforce" ? "quickjs" : this.#config?.executor.runtime,
       resolveParticipantGuidance: ({ model, runner }) => {
         const targetModel = model ?? (runner === "pi" && context.model
           ? `${context.model.provider}/${context.model.id}`

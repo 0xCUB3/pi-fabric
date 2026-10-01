@@ -71,6 +71,15 @@ interface FabricAgentRequest {
   /** Filesystem execution directory; relative paths resolve from the parent agent cwd. */
   cwd?: string;
   worktree?: boolean;
+  /** Shell command run in the new worktree before launch. */
+  worktreeSetup?: string;
+  /** Pi only. branch: fork this conversation (last completed turn); snippet: prefix recent messages. */
+  seed?: "task" | "branch" | "snippet";
+  seedMessages?: number;
+  /** Pi only write confinement; bash needs shell: "unconfined". */
+  readOnly?: boolean;
+  writableRoots?: string[];
+  shell?: "deny" | "unconfined";
   schema?: Record<string, unknown>;
   prompt?: string;
   instructions?: string;
@@ -280,6 +289,11 @@ interface FabricAgentResult extends FabricAgentHandle {
   error?: string;
   usage: { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number };
   pendingMessages?: { steering: string[]; followUp: string[] };
+  /** worktree: true runs; worktree stays the path. */
+  worktreeResult?: {
+    path: string; branch?: string; baseRef?: string; changedFiles: string[];
+    diffstat: { files: number; insertions: number; deletions: number }; kept: boolean; diffError?: string;
+  };
 }
 interface FabricModelInfo {
   runner?: FabricAgentRunner;
@@ -729,7 +743,11 @@ interface FabricAgentsApi {
   status(args: FabricAgentTargetArgs): Promise<FabricAgentResult | FabricAgentHandle | FabricMainAgentInfo | FabricActorInfo | FabricParticipantInfo>;
   list(args?: { scope?: FabricParticipantScope }): Promise<Array<FabricAgentResult | FabricAgentHandle | FabricParticipantInfo>>;
   members(args?: { scope?: FabricParticipantScope; kinds?: FabricParticipantKind[]; includeStale?: boolean }): Promise<FabricParticipantInfo[]>;
-  self(): Promise<FabricParticipantInfo>;
+  /** lineage mirrors PI_FABRIC_LINEAGE in child workers. */
+  self(): Promise<FabricParticipantInfo & { lineage?: {
+    version: 1; rootSessionId: string; parentSessionId?: string; parentRunId?: string;
+    runId: string; depth: number; childIndex: number; worker: true;
+  } }>;
   main(): Promise<FabricMainAgentInfo>;
   sessions(): Promise<FabricParticipantInfo[]>;
   peers(): Promise<FabricPeerInfo[]>;

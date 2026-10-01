@@ -174,6 +174,19 @@ export class FabricExecutionService {
   }
 
   async execute(options: FabricExecutionOptions): Promise<FabricExecutionResult> {
+    const executor = this.config.executor;
+    if (
+      process.env.PI_FABRIC_WRITE_POLICY &&
+      (executor.kernel === "python"
+        ? executor.pythonRuntime !== "monty"
+        : this.config.schema.mode !== "enforce" && executor.runtime !== "quickjs")
+    ) {
+      // Native executors bypass a confined child's tool_call write guard.
+      const { readWritePolicy } = await import("./agents/write-guard.js");
+      if (readWritePolicy()?.shell !== "unconfined") {
+        throw new Error('Fabric write policy refuses native executors (CPython, node-process, bun-process); the parent must request shell: "unconfined"');
+      }
+    }
     const startedAt = performance.now();
     const assessment = this.config.trace.assessment ? new FabricAssessmentRecorder() : undefined;
     const traceRecorder = new FabricExecutionTraceRecorder(assessment);

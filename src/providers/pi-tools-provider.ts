@@ -596,6 +596,13 @@ export class PiToolsProvider implements FabricProvider {
   ): Promise<unknown> {
     const name = actionName as PiCoreToolName;
     this.#assertAllowed(name);
+    if (process.env.PI_FABRIC_WRITE_POLICY) {
+      // Confined child: also enforce on paths where no tool_call hook replays.
+      const guard = await import("../agents/write-guard.js");
+      const policy = guard.readWritePolicy();
+      const denial = policy && guard.writePolicyDenial(policy, name, args, context.extensionContext?.cwd || this.#cwd);
+      if (denial) throw new Error(denial);
+    }
     if (!this.#requireCapturedOverrides && !this.#tools[name]) throw new Error(`Unknown Pi tool: ${actionName}`);
     if (name === "bash" && !this.#requireCapturedOverrides && !this.#catalog?.get(name)) {
       const intercepted = await tryExecuteGitWorktreeAdd(args, this.#cwd);
