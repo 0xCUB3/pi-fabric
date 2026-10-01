@@ -89,6 +89,10 @@
     "orchestration"
   ],
   "license": "MIT",
+  "funding": {
+    "type": "opencollective",
+    "url": "https://opencollective.com/pi-fabric"
+  },
   "author": "monotykamary",
   "repository": {
     "type": "git",

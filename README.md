@@ -1,6 +1,10 @@
 <div align="center">
 
-# 🧵 pi-fabric
+<p>
+  <img src="https://raw.githubusercontent.com/monotykamary/pi-fabric/main/media/opencollective/logo-dark.svg" alt="Pi Fabric logo" width="96" height="96">
+</p>
+
+# pi-fabric
 
 **A programmable tool and agent runtime for [Pi](https://github.com/earendil-works/pi-coding-agent)**
 
@@ -15,6 +19,7 @@ _One program for tools, MCP, agents, workflows, actors, mesh, councils, and recu
 [![checks](https://img.shields.io/github/actions/workflow/status/monotykamary/pi-fabric/test.yml?branch=main&style=for-the-badge&label=checks)](https://github.com/monotykamary/pi-fabric/actions/workflows/test.yml)
 [![pi extension](https://img.shields.io/badge/pi-extension-8b5cf6?style=for-the-badge)](https://github.com/earendil-works/pi-coding-agent)
 [![license](https://img.shields.io/badge/license-MIT-f4c430?style=for-the-badge)](LICENSE)
+[![Open Collective](https://img.shields.io/badge/Open_Collective-support-151515?style=for-the-badge&logo=opencollective&logoColor=white)](https://opencollective.com/pi-fabric)
 
 <p align="center">
   🏆 <strong><a href="https://arcprize.org/scorecards/d4c56c67-136b-4643-b648-62ae28fe2a54">100% on ARC-AGI-3</a></strong>. A Fabric-powered agent won <strong>all 25 environments</strong> in one 22.4-hour session with 4 minutes of human time ($1,349 in model spend).
@@ -182,6 +187,23 @@ The test suite covers:
 - workflows, durable mesh state, actor mailboxes, subscriptions, and actor restoration
 
 Claude and Veda fixtures use local test processes with zero billable requests.
+
+## Support Pi Fabric
+
+If Fabric helps you build or run agent workflows, consider [supporting the project on Open Collective](https://opencollective.com/pi-fabric). Contributions help fund maintenance, bug fixes, documentation, testing infrastructure, and model/API costs for integration testing and reproducible evaluations.
+
+| Contribution | Monthly support | Helps sustain |
+| --- | --- | --- |
+| Backer | From $5 USD | Everyday maintenance and documentation |
+| Supporter | $25 USD | Integration tests and reproducible evaluations |
+| Sponsor | From $100 USD | Long-term development and project infrastructure |
+| Custom donation | Any amount, one-time or recurring | The work that needs it most |
+
+[Contribute →](https://opencollective.com/pi-fabric/contribute) · [View finances and contributors](https://opencollective.com/pi-fabric)
+
+Contributions are voluntary support, not a purchase of priority support, feature delivery, or influence over the roadmap. The collective page shows current fiscal-host status, available contribution options, and financial contributors.
+
+Code, documentation, bug reports, and examples are just as welcome. Thank you to everyone helping keep Fabric open and sustainable.
 
 ## Acknowledgments
 
