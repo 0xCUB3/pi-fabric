@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { writeFileAtomic } from "../core/atomic-write.js";
+import {
+  writeFileAtomic,
+  encodeOwnerIdentityLine,
+  lockOwnerLiveness,
+  SHORT_LOCK_MAX_HOLD_MS,
+} from "../core/atomic-write.js";
 import { readJsonlPage } from "../log-tail.js";
 import { captureStoragePut, captureStorageDelete, storageRevision } from "../verified/storage.js";
 
@@ -687,7 +692,7 @@ export class MeshStore {
     while (true) {
       try {
         fs.mkdirSync(this.#lockPath, { mode: 0o700 });
-        fs.writeFileSync(ownerPath, `${token}\n${process.pid}\n${Date.now()}\n`, {
+        fs.writeFileSync(ownerPath, `${token}\n${process.pid}\n${Date.now()}\n${encodeOwnerIdentityLine()}\n`, {
           encoding: "utf8",
           mode: 0o600,
         });
@@ -733,10 +738,14 @@ export class MeshStore {
       }
     }
     if (owner !== undefined) {
-      const [, pidText, createdText] = owner.trim().split("\n");
+      const [, pidText, createdText, identityLine] = owner.trim().split("\n");
       const createdAt = Number(createdText);
       if (Number.isFinite(createdAt) && Date.now() - createdAt <= this.#staleLockMs) return false;
-      if (processAlive(Number(pidText))) return false;
+      // Unknown (another PID namespace within the hold ceiling) is not death.
+      if (lockOwnerLiveness(Number(pidText), createdAt, identityLine, {
+        legacyAlive: processAlive,
+        maxHoldMs: Math.max(SHORT_LOCK_MAX_HOLD_MS, this.#staleLockMs),
+      }) !== "dead") return false;
       try {
         if (fs.readFileSync(ownerPath, "utf8") !== owner) return false;
         fs.rmSync(this.#lockPath, { recursive: true, force: true });

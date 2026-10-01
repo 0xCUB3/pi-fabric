@@ -8,6 +8,7 @@ import type { FabricActorInfo, FabricActorRequest } from "../actors/types.js";
 import type { AgentHandleInfo, AgentRunRequest } from "../agents/types.js";
 import type { FabricKernel } from "../runtime/kernel.js";
 import type { MeshIdentity } from "../mesh/store.js";
+import type { OwnerHeartbeatFields } from "../core/atomic-write.js";
 export const sleepUnlessAborted = (ms: number, signal?: AbortSignal): Promise<void> =>
   // Executor form: the configured lib is ES2022, which has no
   // Promise.withResolvers, and an abort listener plus a timer need shared
@@ -96,7 +97,9 @@ export interface ResidentHostConfig {
   modelGuidance?: FabricOwnedModelGuidance[];
 }
 
-export interface ResidentHostOwner {
+// `identity` and `heartbeatAt` are additive (format stays 1): they let a
+// reader in another PID namespace judge the owner by heartbeat.
+export interface ResidentHostOwner extends OwnerHeartbeatFields {
   format: typeof RESIDENT_HOST_FORMAT;
   hostId: string;
   pid: number;

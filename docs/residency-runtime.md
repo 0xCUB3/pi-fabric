@@ -53,6 +53,40 @@ and reconnection.
 The host exits after its normal idle grace once it owns no live durable actor or
 running durable agent.
 
+## Containers and PID namespaces
+
+`kill(pid, 0)` only answers within the caller's PID namespace and boot. In a
+container, the same number can name an unrelated process or nothing, and after
+PID reuse it names a stranger. Fabric owners therefore record an identity:
+`hostname`, the Linux PID namespace (`/proc/self/ns/pid`), the boot id, and the
+process start time. The owner-liveness section of `src/core/atomic-write.ts`
+judges an owner as follows:
+
+- Same host, namespace and boot: the signal probe decides (`ESRCH` dead,
+  `EPERM` alive). On Linux, a different `/proc/<pid>/stat` start time for the
+  same PID means reuse, so the owner is dead.
+- Another namespace, host or boot: only a heartbeat decides. A fresh heartbeat
+  is alive, a stale one is dead, and none is `unknown`. On the same host, a
+  different boot id with no heartbeat is dead, since no process outlives its
+  boot.
+- Records without identity fields keep the earlier signal-probe behaviour.
+
+`unknown` is never treated as death. A lock whose owner might be alive is not
+stolen.
+
+The resident host is a long-lived owner. Its start lock and `owner.json` carry
+additive `identity` and `heartbeatAt` fields, and the format stays `1`. The
+heartbeat refreshes every 10 s, and a heartbeat older than 45 s is stale. The
+Schema commit lock heartbeats the same way while a transaction runs. Short
+mesh, actor-store and file locks carry an identity line only. Across
+namespaces, their creation time serves as the heartbeat, with a 10-minute hold
+ceiling (or the lock's stale window, if longer). Scratch markers record
+identity and no heartbeat, so the sweeper leaves a foreign owner's scratch
+alone.
+
+Hosts and containers that share `.pi/fabric` need clocks that agree within the
+heartbeat TTL.
+
 ## Validation
 
 Run:

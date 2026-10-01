@@ -6,6 +6,7 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { encodeOwnerIdentityLine, lockOwnerLiveness, SHORT_LOCK_MAX_HOLD_MS } from "./atomic-write.js";
 
 const DEFAULT_LOCK_ATTEMPTS = 50;
 const DEFAULT_LOCK_DELAY_MS = 5;
@@ -56,15 +57,22 @@ const processAlive = (pid: number): boolean => {
   }
 };
 
+// The identity line is additive: older readers only consume the first three.
+const ownerText = (token: string): string =>
+  `${token}\n${process.pid}\n${Date.now()}\n${encodeOwnerIdentityLine()}\n`;
+
 const ownerCanBeReaped = (owner: string, mtimeMs: number, staleMs: number): boolean => {
-  const [, pid, created] = owner.split("\n");
+  const [, pid, created, identity] = owner.split("\n");
   const timestamp = Number(created);
   // Damaged metadata must not strand the lock forever. Still protect a live
   // PID, and use filesystem age when the creation timestamp is unusable.
   const since = created?.trim() && Number.isSafeInteger(timestamp) && timestamp >= 0 && timestamp <= Date.now()
     ? timestamp
     : mtimeMs;
-  return Date.now() - since > staleMs && !processAlive(Number(pid));
+  return Date.now() - since > staleMs && lockOwnerLiveness(Number(pid), since, identity, {
+    legacyAlive: processAlive,
+    maxHoldMs: Math.max(SHORT_LOCK_MAX_HOLD_MS, staleMs),
+  }) === "dead";
 };
 
 const sleepAsync = (ms: number): Promise<void> =>
@@ -110,7 +118,7 @@ export const withExclusiveFileLockAsync = async <T>(
     try {
       await fs.promises.mkdir(lock, { mode: 0o700 });
       try {
-        await fs.promises.writeFile(ownerPath, `${token}\n${process.pid}\n${Date.now()}\n`, {
+        await fs.promises.writeFile(ownerPath, ownerText(token), {
           encoding: "utf-8",
           mode: 0o600,
         });
@@ -232,7 +240,7 @@ export const withExclusiveFileLock = <T>(
     try {
       fs.mkdirSync(lock, { mode: 0o700 });
       try {
-        fs.writeFileSync(ownerPath, `${token}\n${process.pid}\n${Date.now()}\n`, {
+        fs.writeFileSync(ownerPath, ownerText(token), {
           encoding: "utf-8",
           mode: 0o600,
         });

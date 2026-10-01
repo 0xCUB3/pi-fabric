@@ -4,7 +4,12 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { writeJsonAtomic } from "../core/atomic-write.js";
+import {
+  writeJsonAtomic,
+  ownerHeartbeatFields,
+  recordOwnerLiveness,
+  startOwnerHeartbeat,
+} from "../core/atomic-write.js";
 import {
   normalizeModelAliases,
   resolveAvailablePiModel,
@@ -70,6 +75,11 @@ const processAlive = (pid: number): boolean => {
     return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "EPERM";
   }
 };
+
+// Identity-less (pre-heartbeat) owners keep the plain signal probe; an owner
+// in another PID namespace is judged by its heartbeat, and "unknown" is not death.
+const ownerAlive = (record: unknown): boolean =>
+  recordOwnerLiveness(record, { legacyAlive: processAlive }) !== "dead";
 
 class ResidentHostAlreadyRunning extends Error {}
 
@@ -138,6 +148,7 @@ class ResidentHost {
   readonly #deliveryPrefix: string;
   readonly #token = randomUUID();
   #requestTimer: NodeJS.Timeout | undefined;
+  #stopHeartbeat: (() => void) | undefined;
   #pollingRequests = false;
   #closed = false;
   #started = false;
@@ -303,6 +314,17 @@ class ResidentHost {
     if (this.#started) return;
     this.#acquireLock();
     this.#started = true;
+    this.#stopHeartbeat = startOwnerHeartbeat((heartbeatAt) => this.#refreshHeartbeat(heartbeatAt));
+    try {
+      await this.#startOwned();
+    } catch (error) {
+      this.#stopHeartbeat();
+      this.#stopHeartbeat = undefined;
+      throw error;
+    }
+  }
+
+  async #startOwned(): Promise<void> {
     fs.mkdirSync(this.#requestsPath, { recursive: true, mode: 0o700 });
     fs.mkdirSync(this.#processingPath, { recursive: true, mode: 0o700 });
     fs.mkdirSync(this.#responsesPath, { recursive: true, mode: 0o700 });
@@ -348,6 +370,7 @@ class ResidentHost {
       token: this.#token,
       startedAt: now,
       readyAt: now,
+      ...ownerHeartbeatFields(now),
     };
     atomicWrite(this.#ownerPath, owner);
     fs.rmSync(this.#errorPath, { force: true });
@@ -359,6 +382,8 @@ class ResidentHost {
     this.#closed = true;
     if (this.#requestTimer) clearInterval(this.#requestTimer);
     this.#requestTimer = undefined;
+    this.#stopHeartbeat?.();
+    this.#stopHeartbeat = undefined;
     while (this.#pollingRequests) await delay(10);
     await this.participants.quiesce().catch(() => undefined);
     await this.lifecycle.close().catch(() => undefined);
@@ -709,27 +734,36 @@ class ResidentHost {
   #acquireLock(): void {
     fs.mkdirSync(this.config.residencyRoot, { recursive: true, mode: 0o700 });
     const existing = readJson<ResidentHostOwner>(this.#ownerPath);
-    if (existing && processAlive(existing.pid)) {
+    if (existing && ownerAlive(existing)) {
       throw new ResidentHostAlreadyRunning(`Fabric resident host is already running (${existing.pid})`);
     }
     try {
       const descriptor = fs.openSync(this.#lockPath, "wx", 0o600);
-      fs.writeFileSync(descriptor, JSON.stringify({ token: this.#token, pid: process.pid }));
+      fs.writeFileSync(descriptor, JSON.stringify({ token: this.#token, pid: process.pid, ...ownerHeartbeatFields() }));
       fs.closeSync(descriptor);
     } catch (error) {
       if (error instanceof Error && "code" in error && error.code === "EEXIST") {
         const locked = readJson<{ pid?: unknown }>(this.#lockPath);
-        if (typeof locked?.pid === "number" && processAlive(locked.pid)) {
+        if (typeof locked?.pid === "number" && ownerAlive(locked)) {
           throw new ResidentHostAlreadyRunning(`Fabric resident host is starting (${locked.pid})`);
         }
         fs.rmSync(this.#lockPath, { force: true });
         const descriptor = fs.openSync(this.#lockPath, "wx", 0o600);
-        fs.writeFileSync(descriptor, JSON.stringify({ token: this.#token, pid: process.pid }));
+        fs.writeFileSync(descriptor, JSON.stringify({ token: this.#token, pid: process.pid, ...ownerHeartbeatFields() }));
         fs.closeSync(descriptor);
       } else {
         throw error;
       }
     }
+  }
+
+  // Long-lived ownership: refresh both the start lock and owner.json while
+  // they are still ours, so readers in other PID namespaces can judge us.
+  #refreshHeartbeat(heartbeatAt: number): void {
+    const lock = readJson<Record<string, unknown>>(this.#lockPath);
+    if (lock?.token === this.#token) atomicWrite(this.#lockPath, { ...lock, heartbeatAt });
+    const owner = readJson<ResidentHostOwner>(this.#ownerPath);
+    if (owner?.token === this.#token) atomicWrite(this.#ownerPath, { ...owner, heartbeatAt });
   }
 
   #releaseLock(): void {

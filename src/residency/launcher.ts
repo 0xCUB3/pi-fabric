@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import crossSpawn from "cross-spawn";
-import { observeResidentOwner } from "./launcher-owner.js";
+import { liveOwnerPid, observeResidentOwner } from "./launcher-owner.js";
 
 // Same pattern as worker.ts: on Windows, `pi` resolves to a node_modules/.bin
 // .cmd shim that a raw spawn cannot execute, and a .js pi entry must run under
@@ -37,17 +37,6 @@ const readConfig = (configPath: string): { cwd: string; piBinary: string } => {
     throw new Error("Fabric resident host config is incomplete");
   }
   return { cwd: config.cwd, piBinary: config.piBinary };
-};
-
-const liveOwnerPid = (ownerPath: string): number | undefined => {
-  try {
-    const owner = JSON.parse(fs.readFileSync(ownerPath, "utf8")) as { pid?: unknown };
-    if (typeof owner.pid !== "number") return undefined;
-    process.kill(owner.pid, 0);
-    return owner.pid;
-  } catch {
-    return undefined;
-  }
 };
 
 const writeFailure = (configPath: string, error: unknown): void => {
