@@ -5,7 +5,7 @@ import type { FabricOwnedModelGuidance } from "../components/model-guidance.js";
 import type { FabricModelAliases, FabricModelCandidate } from "../core/model-resolution.js";
 import type { FabricAgentConfig, FabricMeshConfig, FabricRetentionConfig } from "../config.js";
 import type { FabricActorInfo, FabricActorRequest } from "../actors/types.js";
-import type { AgentHandleInfo, AgentRunRequest } from "../agents/types.js";
+import type { AgentHandleInfo, AgentRunRequest, FabricRunOutcome } from "../agents/types.js";
 import type { FabricKernel } from "../runtime/kernel.js";
 import type { MeshIdentity } from "../mesh/store.js";
 import type { OwnerHeartbeatFields } from "../core/atomic-write.js";
@@ -114,6 +114,8 @@ interface ResidentSpawnCommand {
   requestId: string;
   rootId: string;
   request: AgentRunRequest;
+  /** A registered runner's residentModule, imported by the host before launch. */
+  runnerModule?: string;
   createdAt: number;
 }
 
@@ -168,6 +170,8 @@ export interface ResidentCommandResponse {
   handle?: AgentHandleInfo;
   actor?: FabricActorInfo;
   error?: string;
+  /** Set when a claimed request was interrupted; the same concept as a run record's outcome. */
+  outcome?: FabricRunOutcome;
   completedAt: number;
 }
 
@@ -178,6 +182,8 @@ export interface ResidentAgentMetadata {
   runDirectory: string;
   handle: AgentHandleInfo;
   worktreeGitRoot?: string;
+  /** Imported again by a restarted host before it re-attaches hosted runs. */
+  runnerModule?: string;
   /** Main consumed this terminal result; suppress queued delivery across reconnects. */
   completionConsumedAt?: number;
   createdAt: number;

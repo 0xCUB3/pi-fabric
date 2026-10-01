@@ -3,7 +3,7 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   writeJsonAtomic,
   ownerHeartbeatFields,
@@ -80,6 +80,23 @@ const processAlive = (pid: number): boolean => {
 // in another PID namespace is judged by its heartbeat, and "unknown" is not death.
 const ownerAlive = (record: unknown): boolean =>
   recordOwnerLiveness(record, { legacyAlive: processAlive }) !== "dead";
+
+// The resident host runs Pi with --no-extensions, so a custom runner is only
+// registered here when its residentModule is imported (once per process).
+const runnerModules = new Map<string, Promise<void>>();
+const loadRunnerModule = (specifier: string): Promise<void> => {
+  if (!/^(?:\/|[A-Za-z]:[\\/]|file:)/.test(specifier)) {
+    return Promise.reject(new Error(`Fabric runner module must be absolute: ${specifier}`));
+  }
+  const url = specifier.startsWith("file:") ? specifier : pathToFileURL(specifier).href;
+  let pending = runnerModules.get(url);
+  if (!pending) {
+    pending = import(url).then(() => undefined);
+    runnerModules.set(url, pending);
+    pending.catch(() => runnerModules.delete(url));
+  }
+  return pending;
+};
 
 class ResidentHostAlreadyRunning extends Error {}
 
@@ -356,6 +373,7 @@ class ResidentHost {
     fs.mkdirSync(this.#responsesPath, { recursive: true, mode: 0o700 });
     fs.mkdirSync(this.#agentsPath, { recursive: true, mode: 0o700 });
     this.#recoverInterruptedRequests();
+    await this.#recoverHostedRuns();
     const firstSeenAgents = new Map<string, number>();
     this.participants.registerSource(() =>
       agentParticipantRecords(
@@ -691,6 +709,7 @@ class ResidentHost {
         ) {
           throw new Error("Durable agents.spawn accepts only its public task and run settings");
         }
+        if (command.runnerModule) await loadRunnerModule(command.runnerModule);
         const handle = await this.agents.spawn({ ...command.request, residency: "durable" });
         const runDirectory = this.agents.runDirectory(handle.id);
         if (!runDirectory) throw new Error(`Resident agent ${handle.id} has no run directory`);
@@ -702,6 +721,7 @@ class ResidentHost {
           runDirectory,
           handle: { ...handle, residency: "durable" },
           ...(worktreeGitRoot ? { worktreeGitRoot } : {}),
+          ...(command.runnerModule ? { runnerModule: command.runnerModule } : {}),
           createdAt: Date.now(),
           updatedAt: Date.now(),
         };
@@ -774,6 +794,29 @@ class ResidentHost {
     this.participants.scheduleRefresh();
   }
 
+  /**
+   * Re-import the runner modules recorded for this host's durable runs, then
+   * re-attach their hosted runs from the persisted locators. A run whose
+   * runner cannot be loaded settles indeterminate; nothing is re-submitted.
+   */
+  async #recoverHostedRuns(): Promise<void> {
+    let entries: string[];
+    try {
+      entries = fs.readdirSync(this.#agentsPath).filter((entry) => entry.endsWith(".json"));
+    } catch {
+      entries = [];
+    }
+    const modules = new Set<string>();
+    for (const entry of entries) {
+      const metadata = readJson<ResidentAgentMetadata>(path.join(this.#agentsPath, entry));
+      if (metadata?.rootId === this.config.rootId && typeof metadata.runnerModule === "string") {
+        modules.add(metadata.runnerModule);
+      }
+    }
+    for (const module of modules) await loadRunnerModule(module).catch(() => undefined);
+    await this.agents.recoverHostedRuns().catch(() => []);
+  }
+
   #recoverInterruptedRequests(): void {
     let entries: string[];
     try {
@@ -788,6 +831,7 @@ class ResidentHost {
         requestId,
         ok: false,
         error: "Fabric residency outcome is indeterminate after resident host restart",
+        outcome: "indeterminate",
         completedAt: Date.now(),
       };
       atomicWrite(path.join(this.#responsesPath, entry), response);

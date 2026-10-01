@@ -32,8 +32,14 @@ const participantKind = (value: unknown): FabricParticipantKind | undefined =>
     ? value
     : undefined;
 
+// Inlined RUNNER_ID_PATTERN (src/agents/runner-registry.ts).
+const RUNNER_ID_PATTERN = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
+const isRunnerId = (value: unknown): value is string =>
+  typeof value === "string" && value.length <= 64 && RUNNER_ID_PATTERN.test(value);
+
 const transports = new Set([
   "host",
+  "hosted",
   "auto",
   "process",
   "tmux",
@@ -67,7 +73,7 @@ const participantFromEntry = (entry: MeshStateEntry): FabricParticipantRecord | 
     typeof value.status !== "string" ||
     (kind === "provider"
       ? value.runner !== undefined || typeof value.provider !== "string"
-      : value.runner !== "pi" && value.runner !== "claude" && value.runner !== "veda") ||
+      : !isRunnerId(value.runner)) ||
     typeof value.transport !== "string" ||
     !transports.has(value.transport) ||
     !Array.isArray(value.capabilities) ||
@@ -188,7 +194,7 @@ const legacyActorFromEntry = (
   if (
     typeof value.id !== "string" ||
     typeof value.name !== "string" ||
-    (value.runner !== "pi" && value.runner !== "claude" && value.runner !== "veda") ||
+    !isRunnerId(value.runner) ||
     typeof value.status !== "string"
   ) {
     return undefined;

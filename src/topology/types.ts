@@ -35,7 +35,7 @@ export interface FabricParticipantRecord {
   runner?: FabricAgentRunner;
   /** Registering provider name for `provider` participants. */
   provider?: string;
-  transport: FabricAgentTransport | "host";
+  transport: FabricAgentTransport | "host" | "hosted";
   capabilities: FabricParticipantCapability[];
   cwd?: string;
   sessionId?: string;

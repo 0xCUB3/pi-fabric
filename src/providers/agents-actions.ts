@@ -7,13 +7,17 @@ import {
 import { FABRIC_LIFECYCLE_EVENTS } from "../lifecycle/types.js";
 import type { FabricActionDescriptor } from "../protocol.js";
 
+// RUNNER_ID_PATTERN (src/agents/runner-registry.ts) as source text; kept in sync by a test.
+const RUNNER_ID_SOURCE = "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$";
+
 const runProperties = {
   task: { type: "string", description: "A self-contained task for the child agent" },
   name: { type: "string" },
   runner: {
     type: "string",
-    enum: ["pi", "claude", "veda"],
-    description: "Execution harness. Defaults to agents.runner.",
+    pattern: RUNNER_ID_SOURCE,
+    maxLength: 64,
+    description: "Execution harness: pi, claude, veda, or a runner registered through pi-fabric/runners. Defaults to agents.runner.",
   },
   kernel: {
     type: "string",
@@ -348,7 +352,7 @@ export const AGENTS_ACTION_DESCRIPTORS: FabricActionDescriptor[] = [
     inputSchema: {
       type: "object",
       properties: {
-        runner: { type: "string", enum: ["pi", "claude", "veda"] },
+        runner: { type: "string", pattern: RUNNER_ID_SOURCE, maxLength: 64 },
         refresh: { type: "boolean" },
       },
       additionalProperties: false,

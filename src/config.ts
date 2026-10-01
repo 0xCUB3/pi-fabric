@@ -42,7 +42,8 @@ export type FabricAgentTransport =
   | "screen"
   | "localterm"
   | "herdr";
-export type FabricAgentRunner = "pi" | "claude" | "veda";
+/** Built-in runner ids, or a runner registered through pi-fabric/runners. */
+export type FabricAgentRunner = "pi" | "claude" | "veda" | (string & {});
 
 /** How a child run's reported model is checked against the requested key.
  * Strict fails the run on a mismatch. Permissive records the reported
@@ -697,8 +698,13 @@ const boundedFloat = (value: unknown, fallback: number, min: number, max: number
 const stringValue = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim() ? value : undefined;
 
+// Inlined copy of RUNNER_ID_PATTERN (src/agents/runner-registry.ts) so config
+// never loads the runner registry; tests/runner-registry-graph.test.ts keeps it in sync.
+const RUNNER_ID_PATTERN = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
+
+// A registered runner may load after config; launch fails closed if it never does.
 const runnerValue = (value: unknown, fallback: FabricAgentRunner): FabricAgentRunner =>
-  value === "pi" || value === "claude" || value === "veda" ? value : fallback;
+  typeof value === "string" && value.length <= 64 && RUNNER_ID_PATTERN.test(value) ? value : fallback;
 
 const modelAdmissionValue = (
   value: unknown,

@@ -282,7 +282,7 @@ describe("Fabric configuration", () => {
       model: "claude/haiku",
     });
     const invalid = normalizeFabricConfig({
-      agents: { runner: "other", claude: { binary: " ", model: " " } },
+      agents: { runner: "Not A Runner", claude: { binary: " ", model: " " } },
     });
     expect(invalid.agents.runner).toBe("pi");
     expect(invalid.agents.claude).toEqual({ binary: "claude" });
@@ -317,7 +317,11 @@ describe("Fabric configuration", () => {
     expect(backendModel.agents.veda.model).toBe("opus");
     const blankBackend = normalizeFabricConfig({ agents: { veda: { backend: " " } } });
     expect(blankBackend.agents.veda.backend).toBe("agy");
-    const invalidRunner = normalizeFabricConfig({ agents: { runner: "other" } });
+    const invalidRunner = normalizeFabricConfig({ agents: { runner: 42 } });
+    expect(invalidRunner.agents.runner).toBe("pi");
+    // A well-formed id may name a runner registered later; launch fails closed if not.
+    const registered = normalizeFabricConfig({ agents: { runner: "acme-daemon" } });
+    expect(registered.agents.runner).toBe("acme-daemon");
     expect(invalidRunner.agents.runner).toBe("pi");
   });
 

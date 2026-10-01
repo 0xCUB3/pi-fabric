@@ -12,6 +12,16 @@ import type { FabricParticipantResidency } from "../topology/types.js";
 import type { InheritedSessionPin } from "./session-pins.js";
 import type { AgentWorktreeResult } from "./worktree-manager.js";
 
+/** Fabric run transports plus adapter-owned ("hosted") runs. */
+export type AgentRunTransport = FabricAgentTransport | "hosted";
+
+/**
+ * A terminal outcome Fabric cannot vouch for: the run may or may not have done
+ * its work (an interrupted claimed request, an unreachable hosted run). Fabric
+ * never replays such work.
+ */
+export type FabricRunOutcome = "indeterminate";
+
 export type AgentRunStatus =
   | "queued"
   | "running"
@@ -140,7 +150,7 @@ export interface AgentRunRecord {
   runner: FabricAgentRunner;
   /** Resolved Fabric kernel; absent for runners without Fabric. */
   kernel?: FabricKernel;
-  transport: FabricAgentTransport;
+  transport: AgentRunTransport;
   cwd: string;
   model?: string;
   thinking?: FabricThinking;
@@ -178,6 +188,14 @@ export interface AgentRunRecord {
   compaction?: AgentCompactionStatus;
   /** Settlement diff summary of a worktree: true run; `worktree` stays the path. */
   worktreeResult?: AgentWorktreeResult;
+  /** Hosted runs: the adapter locator, persisted before the run is submitted. */
+  hosted?: { locator: unknown };
+  /** A hosted run the adapter reports parked; still running, not dead. */
+  sleeping?: true;
+  /** Set on terminal records whose effect Fabric cannot confirm. */
+  outcome?: FabricRunOutcome;
+  /** A hosted runner's failure hint; Fabric itself never retries. */
+  retryable?: boolean;
 }
 
 export interface AgentRunResult extends AgentRunRecord {
@@ -191,7 +209,7 @@ export interface AgentHandleInfo {
   runner: FabricAgentRunner;
   /** Resolved Fabric kernel; absent for runners without Fabric. */
   kernel?: FabricKernel;
-  transport: FabricAgentTransport;
+  transport: AgentRunTransport;
   cwd: string;
   model?: string;
   thinking?: FabricThinking;
@@ -296,7 +314,7 @@ export interface AgentTransportLaunch {
 }
 
 export interface AgentTransportHandle {
-  kind: FabricAgentTransport;
+  kind: AgentRunTransport;
   sessionId?: string;
   attachCommand?: string;
   livenessPollIntervalMs?: number;

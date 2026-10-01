@@ -10,6 +10,7 @@ import type { FabricActorInfo, FabricActorRequest } from "../actors/types.js";
 import type { FabricAgentLog, AgentHandleInfo, AgentRunRecord, AgentRunRequest, AgentRunResult } from "../agents/types.js";
 import { readChildToolAllowlist } from "../core/child-tool-allowlist.js";
 import { resolveAgentCwd } from "../agents/manager.js";
+import { BUILT_IN_RUNNER_IDS, requireAgentRunner } from "../agents/runner-registry.js";
 import { isFabricWorktreePath } from "../agents/worktree-paths.js";
 import { executeFile, processIsAlive, spawnDetached } from "../agents/transports/process-utils.js";
 import { readJsonlPage } from "../log-tail.js";
@@ -234,6 +235,12 @@ export class ResidencyClient {
     const resolvedRequest = request.cwd === undefined
       ? request
       : { ...request, cwd: resolveAgentCwd(this.options.config.cwd, request.cwd) };
+    // Registration is process-local: the resident host must import the runner too.
+    const runner = request.runner ?? this.options.config.agents.runner;
+    const runnerModule = BUILT_IN_RUNNER_IDS.has(runner) ? undefined : requireAgentRunner(runner).residentModule;
+    if (!BUILT_IN_RUNNER_IDS.has(runner) && !runnerModule) {
+      throw new Error(`Fabric runner ${runner} declares no residentModule; durable residency needs one`);
+    }
     // Freeze inherited optional-tool authority before transferring to an existing host.
     const allowedTools = this.#inheritedToolAllowlist;
     const tools = allowedTools === undefined ? undefined
@@ -246,6 +253,7 @@ export class ResidencyClient {
         requestId: randomUUID(),
         rootId: this.options.config.rootId,
         request: { ...resolvedRequest, ...(tools ? { tools } : {}), residency: "durable" },
+        ...(runnerModule ? { runnerModule } : {}),
         createdAt: Date.now(),
       },
       signal,

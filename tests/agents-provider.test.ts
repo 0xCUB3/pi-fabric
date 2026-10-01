@@ -402,11 +402,14 @@ describe("AgentsProvider runner support", () => {
     const { provider } = setup();
     const run = await provider.describe("run", context);
     const spawn = await provider.describe("spawn", context);
-    type RunnerProperty = { enum?: string[]; type?: string; description?: string };
+    type RunnerProperty = { enum?: string[]; pattern?: string; type?: string; description?: string };
     const runProperties = (run?.inputSchema as { properties: Record<string, RunnerProperty> }).properties;
     const spawnProperties = (spawn?.inputSchema as { properties: Record<string, RunnerProperty> }).properties;
-    expect(runProperties.runner?.enum).toEqual(["pi", "claude", "veda"]);
-    expect(spawnProperties.runner?.enum).toEqual(["pi", "claude", "veda"]);
+    for (const properties of [runProperties, spawnProperties]) {
+      expect(properties.runner?.description).toContain("pi, claude, veda");
+      expect(new RegExp(properties.runner!.pattern!).test("veda")).toBe(true);
+      expect(new RegExp(properties.runner!.pattern!).test("Bad Runner")).toBe(false);
+    }
     expect(runProperties.persona?.type).toBe("string");
     expect(runProperties.persona?.description).toContain("Veda persona");
     expect(spawnProperties.persona?.type).toBe("string");

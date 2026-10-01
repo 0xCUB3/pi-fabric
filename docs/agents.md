@@ -315,6 +315,81 @@ Each run gets an isolated `fabric-<run-id>` Veda session through `-S` and `--no-
 
 Veda children do not have recursive Fabric capabilities. Fabric rejects `recursive: true`. Veda does not support steering, so steer and follow-up calls throw when called. It also cannot run persistent actors because each invocation executes one headless prompt. Use `runner: "pi"` when you need recursive Fabric or persistent coordination.
 
+### Custom runners
+
+A Pi extension can add a runner through the `pi-fabric/runners` subpath. The subpath is never loaded by the Fabric extension at startup.
+
+```ts
+import { registerAgentRunner, listAgentRunners, getAgentRunner } from "pi-fabric/runners";
+
+const unregister = registerAgentRunner(adapter); // FabricWorkerRunner | FabricHostedRunner
+```
+
+Every adapter has an `id` (`/^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/`, at most 64 characters; `pi`, `claude`, and `veda` cannot be replaced), a `label`, and a `capabilities` object in which every flag is a required boolean: `recursiveFabric`, `steer`, `followUp`, `persistentSessions`, `kernels`, `handoff`, `modelDiscovery`, `imageInput`, `compaction`, `questions`, `sleep`, `writePolicy`. Optional hooks are `models()`, `defaultModel()`, `normalizeModel()`, and `mapTools()`. The built-in runners declare their flags in the same table, so every capability check is uniform. Fabric refuses a request that needs an undeclared capability before admission, budget, or worktree side effects: `recursive: true` needs `recursiveFabric`, an explicit `kernel` needs `kernels`, `images` need `imageInput`, session seeds (trajectory handoff, `seed: "branch"`) need `handoff`, `readOnly`/`writableRoots`/`shell` or an inherited confinement need `writePolicy`, routed child dialogs need `questions`, `agents.compact` needs `compaction`, and actors need `persistentSessions`. A runner that declares `writePolicy` receives the effective policy in its launch context and must enforce it.
+
+Two kinds exist:
+
+- `kind: "worker"`: `launch(context)` returns `{ workerPath, workerArguments }`. Fabric runs that script under the selected transport and reads the [worker protocol](#worker-protocol) files. The context carries the run files, the task and launch facts, and `fabricWorker`, the launch Fabric would use for its own worker, so an adapter can wrap it. The optional `stop()` runs before the transport kills the process. A worker that dies before any progress is relaunched with the same launch (startup retry); Fabric never re-prompts a custom worker mid-run.
+- `kind: "hosted"`: no Fabric process. The adapter owns execution, for example in a daemon. `prepare(context)` must be pure and returns a JSON locator of at most 8 KiB. Fabric writes it to the run record (`hosted.locator`) and `hosted.json` before it calls `start(locator, context, reporter)`. `context.idempotencyKey` is the Fabric run id, so a second submission with the same key must not start a second run. `liveness(locator)` answers `running`, `sleeping`, `settled`, `cancelled`, `interrupted`, or `unknown`. `stop(locator, reason)` is required and returns `{ confirmed }`. `abort`, `sleep`/`wake` (with the `sleep` capability), `steer`, and `followUp` are optional. The adapter delivers steer and follow-up messages itself; a delivery failure lands in the run transcript.
+
+The hosted `reporter` has `progress({ turns, toolCalls, currentTool, text })`, `usage(total)` with the cumulative run usage (Fabric records the increase, which feeds budgets and `tokens.usage` lifecycle events), `transcript(event)`, `question(q)`, `finish({ status, output, structured? })`, and `fail({ error, retryable })`. `question` routes like a Pi child dialog: direct UI when the parent has one, otherwise a [decision](decisions.md#routed-child-questions), and only with `agents.childQuestions: "route"`. The run record shows `blockedOn` while it waits.
+
+Fabric never relaunches or re-prompts a hosted run. A `sleeping` run stays `running` with `sleeping: true`. When liveness reports `interrupted` or `unknown` (or `settled` without a result), the run settles `failed` with `outcome: "indeterminate"`. The same outcome marks a stop the adapter did not confirm, and a durable spawn request the resident host was processing when it restarted. Hosted runs work with `agents.run`, `spawn`, `wait`, `status`, `stop`, `steer`, `followUp`, the dashboard, budgets, and `residency: "durable"`. Persistent actors need a worker runner.
+
+Registration is process-local. The resident host runs Pi with `--no-extensions`, so a durable run of a custom runner requires `residentModule`: an absolute path to an ES module that registers the adapter when imported. Fabric refuses a durable spawn without it. The resident host imports the module before launch. On restart it imports it again and calls `attach(locator, context, reporter)` for every unfinished hosted run; a run whose runner cannot be loaded settles indeterminate. When the resident host shuts down, durable hosted runs are detached; they keep running and are re-attached on the next start. Session hosted runs are stopped with the session.
+
+An illustrative daemon-backed adapter:
+
+```ts
+import { registerAgentRunner, type FabricHostedRunner } from "pi-fabric/runners";
+
+const daemon = "http://127.0.0.1:7777"; // hypothetical job daemon
+const call = async (path: string, body?: unknown) =>
+  (await fetch(`${daemon}${path}`, { method: body ? "POST" : "GET", body: JSON.stringify(body) })).json();
+
+const runner: FabricHostedRunner = {
+  kind: "hosted",
+  id: "jobd",
+  label: "Job daemon",
+  residentModule: new URL(import.meta.url).pathname,
+  capabilities: {
+    recursiveFabric: false, steer: true, followUp: false, persistentSessions: false,
+    kernels: false, handoff: false, modelDiscovery: false, imageInput: false,
+    compaction: false, questions: false, sleep: false, writePolicy: false,
+  },
+  prepare: (context) => ({ job: context.idempotencyKey }),
+  start: async ({ job }: any, context, reporter) => {
+    await call("/jobs", { id: job, task: context.task, cwd: context.cwd }); // idempotent by id
+    void follow(job, reporter);
+  },
+  attach: async ({ job }: any, _context, reporter) => void follow(job, reporter),
+  liveness: async ({ job }: any) => (await call(`/jobs/${job}`)).state ?? "unknown",
+  stop: async ({ job }: any) => ({ confirmed: (await call(`/jobs/${job}/stop`, {})).stopped === true }),
+  steer: async ({ job }: any, message) => void (await call(`/jobs/${job}/input`, { message })),
+};
+
+async function follow(job: string, reporter: Parameters<FabricHostedRunner["start"]>[2]) {
+  const result = await call(`/jobs/${job}/wait`); // replays the result after a restart
+  reporter.usage(result.usage);
+  reporter.finish({ status: result.ok ? "completed" : "failed", output: result.text });
+}
+
+registerAgentRunner(runner);
+```
+
+### Worker protocol
+
+A worker runner process talks to Fabric through four files named in `context.files`. `pi-fabric/runners` exports a JSON Schema for each (`AgentRunRecordSchema`, `LifecycleLineSchema`, `TranscriptEventSchema`, `SteerCommandSchema`, protocol version `FABRIC_WORKER_PROTOCOL_VERSION = 1`). Readers ignore unknown fields.
+
+| File | Direction | Content |
+| --- | --- | --- |
+| `statusFile` | worker writes | The run record, replaced atomically (write a temporary file, then rename). `status` moves from `running` to `completed`, `failed`, `stopped`, or `timed_out`; `text`, `value`, `error`, `turns`, `toolCalls`, `usage` (cumulative), `currentTool`, and `blockedOn` are the public fields. |
+| `lifecycleFile` | worker appends | One `{ version: 1, event, occurredAt, data }` line per event: `tokens.usage` (a per-event increase), `question` (a dialog to route), and the `pi.*` lifecycle events. |
+| `logFile` | worker appends | Transcript events for logs and the dashboard: `message_end` with a `user` or `assistant` message, `tool_execution_start`, `tool_execution_end`, and `extension_error`. |
+| `steerFile` | Fabric appends | Commands with `id` and `ts`: `steer`, `follow_up`, `set_steering_mode`, `set_follow_up_mode`, `compact`, and `ui_response` (`requestId` plus `value`, `confirmed`, or `cancelled`) answering a routed `question`. |
+
+A worker that exits without a terminal record is treated as a dead transport: it is relaunched only when it made no progress, and otherwise settles failed.
+
 ### Switching Main's session model
 
 `agents.switchModel` changes the live Pi session model in place and keeps it there:

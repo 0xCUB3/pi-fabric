@@ -21,6 +21,10 @@
       "types": "./dist/agents.d.ts",
       "import": "./dist/agents.js"
     },
+    "./runners": {
+      "types": "./dist/runners.d.ts",
+      "import": "./dist/runners.js"
+    },
     "./mcp": {
       "types": "./dist/mcp.d.ts",
       "import": "./dist/mcp.js"

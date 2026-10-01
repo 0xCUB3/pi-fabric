@@ -83,6 +83,11 @@ import { AGENTS_ACTION_DESCRIPTORS } from "./agents-actions.js";
 import { actionArgNormalizer } from "./arg-normalization.js";
 import { isFabricThinking } from "../thinking.js";
 import { normalizeAgentRunRequest } from "../agents/request.js";
+import {
+  BUILT_IN_RUNNER_IDS,
+  isFabricRunnerId,
+  requireAgentRunner,
+} from "../agents/runner-registry.js";
 import { ResidencyClient } from "../residency/client.js";
 import { ResidentActorClient } from "../residency/actor-client.js";
 import { AgentTranscriptReader } from "../ui/transcript.js";
@@ -167,6 +172,12 @@ const longerTimeoutOverride = (
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
   const effective = effectiveAgentTimeoutMs(manager.config.timeoutMs, value);
   return effective > manager.config.timeoutMs ? effective : undefined;
+};
+
+const checkedRunner = (value: unknown, fallback: FabricAgentRunner): FabricAgentRunner => {
+  if (value === undefined) return fallback;
+  if (!isFabricRunnerId(value)) throw new Error(`Invalid Fabric agent runner: ${JSON.stringify(value)}`);
+  return value;
 };
 
 const checkedKernel = (value: unknown): AgentRunRequest["kernel"] => {
@@ -267,13 +278,13 @@ const actorRequest = (
     typeof (args.validWhile as { source?: unknown }).source === "string"
     ? { version: 1 as const, source: (args.validWhile as { source: string }).source }
     : undefined;
-  const runner =
-    args.runner === "pi" || args.runner === "claude" || args.runner === "veda"
-      ? args.runner
-      : manager.config.runner;
-  if (runner === "veda") {
+  const runner = checkedRunner(args.runner, manager.config.runner);
+  const runnerAdapter = requireAgentRunner(runner);
+  if (!runnerAdapter.capabilities.persistentSessions) {
     throw new Error(
-      'The Veda runner does not support persistent actors: Veda executes one headless prompt per invocation. Use a Pi or Claude actor, or agents.run({ runner: "veda" }).',
+      runner === "veda"
+        ? 'The Veda runner does not support persistent actors: Veda executes one headless prompt per invocation. Use a Pi or Claude actor, or agents.run({ runner: "veda" }).'
+        : `The ${runnerAdapter.label} runner does not declare persistentSessions; use agents.run() or a runner that supports persistent actors.`,
     );
   }
   const requestedKernel = checkedKernel(args.kernel);
@@ -438,10 +449,7 @@ export class AgentsProvider implements FabricProvider {
     context: FabricInvocationContext,
     runnerOverride?: FabricAgentRunner,
   ): Record<string, unknown> {
-    const runner = runnerOverride ??
-      (args.runner === "pi" || args.runner === "claude" || args.runner === "veda"
-        ? args.runner
-        : this.manager.config.runner);
+    const runner = runnerOverride ?? checkedRunner(args.runner, this.manager.config.runner);
     if (runner !== "pi") return args;
     const model = typeof args.model === "string" ? args.model.trim() : "";
     if (!model) return args;
@@ -765,10 +773,14 @@ export class AgentsProvider implements FabricProvider {
       case "unsubscribe":
         return this.lifecycle.unsubscribe(String(args.id));
       case "models": {
-        const runner =
-          args.runner === "pi" || args.runner === "claude" || args.runner === "veda"
-            ? args.runner
-            : this.manager.config.runner;
+        const runner = checkedRunner(args.runner, this.manager.config.runner);
+        const runnerAdapter = requireAgentRunner(runner);
+        if (!BUILT_IN_RUNNER_IDS.has(runner)) {
+          // A registered runner discovers its own models; none means an advisory empty list.
+          return runnerAdapter.models
+            ? [...await runnerAdapter.models({ cwd: this.manager.cwd, refresh: args.refresh === true })]
+            : [];
+        }
         if (runner === "veda") {
           // Veda forwards any -m value to the configured backend; model
           // discovery would require parsing `veda models <backend>`. Return an

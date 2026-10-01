@@ -9,6 +9,7 @@ import { DEFAULT_FABRIC_CONFIG } from "../src/config.js";
 import type { FabricMainAgentDeliveryRequest, FabricMainAgentTarget } from "../src/main-agent.js";
 import { MeshStore, type MeshIdentity } from "../src/mesh/store.js";
 import { ResidencyClient } from "../src/residency/client.js";
+import { registerAgentRunner } from "../src/runners.js";
 import { ResidentActorClient } from "../src/residency/actor-client.js";
 import {
   RESIDENT_HOST_FORMAT,
@@ -233,6 +234,38 @@ describe("durable cwd validation", () => {
       expect(fs.existsSync(path.join(state.config.residencyRoot, "owner.json"))).toBe(false);
       expect(fs.existsSync(path.join(state.config.residencyRoot, "requests"))).toBe(false);
     } finally {
+      await client.close();
+      await state.participants.close();
+    }
+  });
+
+  it("refuses a durable custom runner that the resident host could not load", async () => {
+    const state = await rootHarness("resident-runner-module");
+    const unregister = registerAgentRunner({
+      kind: "worker",
+      id: "local-only",
+      label: "Local only",
+      capabilities: {
+        recursiveFabric: false, steer: false, followUp: false, persistentSessions: false,
+        kernels: false, handoff: false, modelDiscovery: false, imageInput: false,
+        compaction: false, questions: false, sleep: false, writePolicy: false,
+      },
+      launch: () => ({ workerPath: "/bin/true", workerArguments: [] }),
+    });
+    const client = new ResidencyClient({
+      config: state.config,
+      mesh: state.mesh,
+      participants: state.participants,
+      mainAgent: state.mainAgent,
+      hostPath,
+    });
+    try {
+      await expect(
+        client.spawnAgent({ task: "durable", runner: "local-only", residency: "durable" }),
+      ).rejects.toThrow(/declares no residentModule/);
+      expect(fs.existsSync(path.join(state.config.residencyRoot, "owner.json"))).toBe(false);
+    } finally {
+      unregister();
       await client.close();
       await state.participants.close();
     }
