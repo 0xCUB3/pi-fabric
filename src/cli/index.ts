@@ -12,7 +12,7 @@ type FabricCliCommand = (argv: string[]) => Promise<number>;
 
 const commands: Record<string, () => Promise<FabricCliCommand>> = {
   mesh: async () => (await import("./mesh.js")).runMeshCli,
-  // Add further subcommands here, e.g. decisions: async () => (await import("./decisions.js")).runDecisionsCli,
+  decisions: async () => (await import("./decisions.js")).runDecisionsCli,
 };
 
 const usage = (): string => [
