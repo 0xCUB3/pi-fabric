@@ -8,6 +8,7 @@ const primaryEntryPoints = [
   "src/mcp.ts",
   "src/agents.ts",
   "src/jev.ts",
+  "src/assessment.ts",
   "src/protocol.ts",
   "src/worker.ts",
   "src/residency/host.ts",
@@ -30,6 +31,9 @@ const primaryEntryPoints = [
 // path lets a session that loaded the previous index resolve delayed modules
 // after the installed package is replaced, while preserving lazy evaluation.
 const lazyEntryPoints = [
+  "src/thinking-control.ts",
+  "src/compaction/owner.ts",
+  "src/compaction/orphan-repair.ts",
   "src/core/provider-operations.ts",
   "src/agents/claude-cli.ts",
   "src/agents/compact-control.ts",

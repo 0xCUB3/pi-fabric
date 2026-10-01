@@ -22,6 +22,10 @@
       "types": "./dist/mcp.d.ts",
       "import": "./dist/mcp.js"
     },
+    "./assessment": {
+      "types": "./dist/assessment.d.ts",
+      "import": "./dist/assessment.js"
+    },
     "./jev": {
       "types": "./dist/jev.d.ts",
       "import": "./dist/jev.js"

@@ -1,5 +1,5 @@
 import type { FabricKernel } from "../runtime/kernel.js";
-import { isFabricAssessmentTraceV1, type FabricAssessmentTraceV1 } from "./assessment.js";
+import type { FabricAssessmentTraceV1 } from "./assessment.js";
 import {
   isFabricExecutionTraceV1,
   type FabricExecutionTraceOperationV1,
@@ -116,7 +116,8 @@ export const createFabricPersistedExecutionDetails = (input: {
     success: input.success,
     ...(input.kernel ? { kernel: input.kernel } : {}),
     trace: cloneTrace(input.trace),
-    ...(input.assessment && isFabricAssessmentTraceV1(input.assessment)
+    // The execution service builds the projection; it is cloned, not re-guarded.
+    ...(input.assessment
       ? { assessment: structuredClone(input.assessment) }
       : {}),
     audits: (input.audits ?? []).map(persistableAudit),

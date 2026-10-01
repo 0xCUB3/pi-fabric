@@ -53,6 +53,8 @@ export interface FabricThinkingBounds {
 
 /** Environment variable carrying a parent's effective bounds into a Pi child. */
 export const FABRIC_THINKING_BOUNDS_ENV = "PI_FABRIC_THINKING_BOUNDS";
+/** Session custom entry recording the active Fabric thinking override. */
+export const FABRIC_THINKING_ENTRY_TYPE = "pi-fabric-thinking";
 
 export const thinkingRank = (level: FabricThinking): number => THINKING_LEVELS.indexOf(level);
 

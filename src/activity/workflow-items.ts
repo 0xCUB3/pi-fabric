@@ -4,9 +4,10 @@ import {
   type FabricWorkflowItemStatusV1,
 } from "../protocol.js";
 
-export const WORKFLOW_ITEM_ID_MAX_CHARS = 128;
+import { isWorkflowItemId, WORKFLOW_ITEM_ID_MAX_CHARS } from "./store.js";
+
+export { isWorkflowItemId, WORKFLOW_ITEM_ID_MAX_CHARS };
 export const WORKFLOW_ITEM_META_MAX_BYTES = 2 * 1024;
-const WORKFLOW_ITEM_ID_PATTERN = /^[A-Za-z0-9._:/-]+$/;
 const MAX_META_DEPTH = 8;
 const MAX_LABEL_CHARS = 120;
 
@@ -18,12 +19,6 @@ const statuses = new Set<FabricWorkflowItemStatusV1>([
   "blocked",
   "stopped",
 ]);
-
-export const isWorkflowItemId = (value: unknown): value is string =>
-  typeof value === "string" &&
-  value.length > 0 &&
-  value.length <= WORKFLOW_ITEM_ID_MAX_CHARS &&
-  WORKFLOW_ITEM_ID_PATTERN.test(value);
 
 const legacyItemId = (value: unknown): string | undefined => {
   if (typeof value !== "string") return undefined;

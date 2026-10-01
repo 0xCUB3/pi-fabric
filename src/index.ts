@@ -48,8 +48,7 @@ import {
 } from "./config.js";
 import { registerCompactionHook } from "./compaction/hook.js";
 import { compactAtConfiguredThreshold, type AutoCompactionTrigger } from "./compaction/threshold.js";
-import { CompactionOwnerObserver } from "./compaction/owner.js";
-import { repairToolResultPairing } from "./compaction/orphan-repair.js";
+import type { CompactionOwnerObserver } from "./compaction/owner.js";
 import {
   createToolOwnershipReassertion,
   fabricModelContext,
@@ -627,7 +626,7 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
     // A Fabric child narrows its level into the parent's inherited bounds.
     if (process.env[FABRIC_THINKING_BOUNDS_ENV] !== undefined && state.bootstrapped) {
       try {
-        state.thinking.enforceBounds(context);
+        await state.thinking.enforceBounds(context);
       } catch (error) {
         console.warn(`[pi-fabric] thinking bounds: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -669,7 +668,7 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
   pi.on("agent_end", async (event, context) => {
     try {
       // Turn-scoped thinking overrides revert here, even before activation.
-      state.thinking.agentEnded(context);
+      await state.thinking.agentEnded(context);
     } catch (error) {
       console.warn(`[pi-fabric] thinking revert failed: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -857,10 +856,20 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
   // Ownership is observed, never contested: the committed entry says who
   // produced it, and a foreign owner under the Fabric engine earns one
   // load-order explanation per session.
-  const compactionOwners = new CompactionOwnerObserver();
+  // The observer loads at the first committed compaction; a deliberate yield
+  // noted before then is handed over when it does.
+  let compactionOwners: Promise<CompactionOwnerObserver> | undefined;
+  let compactionYieldPending = false;
   pi.on("session_compact", async (event, context) => {
     const fabricEngine = (state.bootstrapped ? state.config : DEFAULT_FABRIC_CONFIG).compaction.engine === "fabric";
-    const { warning } = compactionOwners.observe(
+    const observer = await (compactionOwners ??= import("./compaction/owner.js").then(
+      (module) => new module.CompactionOwnerObserver(),
+    ));
+    if (compactionYieldPending) {
+      compactionYieldPending = false;
+      observer.noteDeliberateYield();
+    }
+    const { warning } = observer.observe(
       context.sessionManager.getSessionId(),
       event.compactionEntry,
       fabricEngine,
@@ -897,10 +906,12 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
       state.bootstrapped
         ? state.config.compaction.outputReserveTokens
         : DEFAULT_FABRIC_CONFIG.compaction.outputReserveTokens,
-    onYield: () => compactionOwners.noteDeliberateYield(),
+    onYield: () => {
+      compactionYieldPending = true;
+    },
   });
 
-  pi.on("context", (event, context) => {
+  pi.on("context", async (event, context) => {
     const sessionId = context.sessionManager.getSessionId();
     const pendingContinuation = state.initialized
       ? state.prewalk.pendingContinuationMessage(sessionId)
@@ -941,6 +952,7 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
     const repairOrphans = (state.bootstrapped ? state.config : DEFAULT_FABRIC_CONFIG).compaction.repairOrphans;
     if (!repairOrphans) return changed ? { messages } : undefined;
     // Identity-preserving: a defect-free list comes back unchanged.
+    const { repairToolResultPairing } = await import("./compaction/orphan-repair.js");
     const repaired = repairToolResultPairing(messages);
     if (repaired.messages !== messages) return { messages: repaired.messages };
     return changed ? { messages } : undefined;

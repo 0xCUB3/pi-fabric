@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   clampThinkingToBounds,
+  FABRIC_THINKING_ENTRY_TYPE,
   isFabricThinking,
   modelThinkingLevels,
   selectThinkingLevel,
@@ -13,11 +14,12 @@ import {
 // Host-session thinking control. The model can raise or lower the main
 // session's reasoning effort for a bounded scope; Fabric applies it through
 // Pi's own setThinkingLevel and reverts at agent_end. Overrides persist as a
-// session custom entry so a reload restores the pending revert. This module is
-// on the eager path (agent_end must revert even before the runtime activates):
-// keep it free of heavy imports.
+// session custom entry so a reload restores the pending revert. FabricState
+// loads this module on first need (see FabricThinkingHost), keeping it off the
+// startup graph.
 
-export const FABRIC_THINKING_ENTRY_TYPE = "pi-fabric-thinking";
+export { FABRIC_THINKING_ENTRY_TYPE };
+
 export const MAX_THINKING_OVERRIDE_TURNS = 20;
 export const MAX_THINKING_REASON_CHARS = 256;
 

@@ -14,7 +14,6 @@ import type {
   FabricPhaseInput,
   FabricRunDisplay,
 } from "./types.js";
-import { isWorkflowItemId } from "./workflow-items.js";
 
 const MAX_RUNS = 24;
 const MAX_CALLS = 1_000;
@@ -39,6 +38,16 @@ const cleanText = (value: unknown, maxChars: number): string | undefined => {
   if (!text) return undefined;
   return text.slice(0, maxChars);
 };
+
+export const WORKFLOW_ITEM_ID_MAX_CHARS = 128;
+const WORKFLOW_ITEM_ID_PATTERN = /^[A-Za-z0-9._:/-]+$/;
+
+/** Stable `workflow.item` id grammar (kept here so the store stays off the lazy workflow-items module). */
+export const isWorkflowItemId = (value: unknown): value is string =>
+  typeof value === "string" &&
+  value.length > 0 &&
+  value.length <= WORKFLOW_ITEM_ID_MAX_CHARS &&
+  WORKFLOW_ITEM_ID_PATTERN.test(value);
 
 const cleanId = (value: unknown, fallback: string): string => {
   const text = cleanText(value, 160);

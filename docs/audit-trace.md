@@ -126,7 +126,7 @@ interface FabricAssessmentTraceV1 {
 }
 ```
 
-Usage and model come only from what an operation already reports: agent run results (`usage`, `model`, including handoff `agent`), Jev `input_tokens`/`output_tokens`, provider results that carry the same shapes, and auto-approval classifier decisions. The projection holds no arguments, results, code, or error prose. It keeps at most 1,024 operation rows and 128 KiB. Totals still count every observed operation. Inside the 512 KiB envelope, assessment rows trim after display audits and before any trace operation. `isFabricAssessmentTraceV1` and `readFabricAssessmentTraceV1` guard it.
+Usage and model come only from what an operation already reports: agent run results (`usage`, `model`, including handoff `agent`), Jev `input_tokens`/`output_tokens`, provider results that carry the same shapes, and auto-approval classifier decisions. The projection holds no arguments, results, code, or error prose. It keeps at most 1,024 operation rows and 128 KiB. Totals still count every observed operation. Inside the 512 KiB envelope, assessment rows trim after display audits and before any trace operation. `isFabricAssessmentTraceV1` and `readFabricAssessmentTraceV1`, exported from the lightweight `pi-fabric/assessment` subpath, guard it.
 
 ## Reading and rendering traces
 
