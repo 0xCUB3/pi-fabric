@@ -87,11 +87,11 @@ pi.events.emit(FABRIC_TOOL_PLACEMENT_EVENT, {
 
 The reply is `{ version: 1, mode, tools }`. `mode` is `"full-code"`, `"enforce"` (Schema enforce), or `"orchestration"`. Each tool maps to:
 
-- `model`: declared to the model this turn. Exclusive modes declare only `fabric_exec`; orchestration declares Pi's active set.
+- `model`: declared to the model this turn. Exclusive modes declare `fabric_exec` plus any resolved [foreground tools](configuration.md#foreground-tools) (full code mode only); orchestration declares Pi's active set.
 - `program`: callable from a `fabric_exec` program, as `pi.<tool>` for Pi core tools or `extensions.<tool>` for captured extension tools. Requires an initialized Fabric runtime and respects child tool allowlists. Schema enforce exposes no `extensions.*` namespace.
 - `unavailable`: neither.
 
-`model` wins when both apply. Omitting `tools` reports every tool registered with Pi; at most 1,024 names of up to 256 characters each are accepted. An invalid query gets no reply. Placement describes state at the time of the query. A later mode change, reload, or tool refresh can change it, so query when you need the answer and do not cache it.
+`model` wins when both apply; optional `programCallable` lists the reported `model` tools that a program can also call, such as foreground tools, and is omitted when empty. Omitting `tools` reports every tool registered with Pi; at most 1,024 names of up to 256 characters each are accepted. An invalid query gets no reply. Placement describes state at the time of the query. A later mode change, reload, or tool refresh can change it, so query when you need the answer and do not cache it.
 
 ## Invocation costs and guarantees
 

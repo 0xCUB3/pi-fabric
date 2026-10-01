@@ -156,7 +156,11 @@ export const createFabricExecTool = (
       // SDK/CLI reload rebuilds the registry before session_start bootstraps
       // the replacement extension. That transient loadout is not a request.
       if (!state.bootstrapped) return undefined;
-      return fabricToolLoadout(loadout, state.config.fullCodeMode || state.config.schema.mode === "enforce");
+      return fabricToolLoadout(
+        loadout,
+        state.config.fullCodeMode || state.config.schema.mode === "enforce",
+        state.foregroundTools(loadout.declared.map((tool) => tool.name)).tools,
+      );
     },
     label: "Fabric",
     description: python

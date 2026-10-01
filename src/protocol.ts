@@ -109,6 +109,8 @@ export interface FabricToolPlacementResultV1 {
   version: 1;
   mode: FabricToolPlacementMode;
   tools: Record<string, FabricToolPlacement>;
+  /** `model` tools a program can also call (foreground tools); omitted when empty. */
+  programCallable?: string[];
 }
 
 /** Host-local synchronous query; omitted `tools` reports every registered tool. */

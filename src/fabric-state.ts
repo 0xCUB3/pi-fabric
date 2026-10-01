@@ -20,6 +20,8 @@ import {
   type FabricSchemaMode,
 } from "./config.js";
 import { FabricSessionApprovals } from "./core/approval-controller.js";
+import { readChildToolAllowlist } from "./core/child-tool-allowlist.js";
+import { NO_FOREGROUND, resolveForegroundTools, type FabricForegroundResolution } from "./core/foreground-tools.js";
 import { PrewalkController } from "./prewalk/controller.js";
 import { PrewalkDriftTracker } from "./prewalk/fs-drift.js";
 import type { FabricThinkingController } from "./thinking-control.js";
@@ -129,6 +131,20 @@ export class FabricState {
 
   get cwd(): string | undefined {
     return this.#cwd;
+  }
+
+  /** Foreground tools declared beside fabric_exec. prepareLoadout passes its pending active set. */
+  foregroundTools(active?: readonly string[]): FabricForegroundResolution {
+    const config = this.#config;
+    if (!config || config.foreground.tools.length === 0) return NO_FOREGROUND;
+    return resolveForegroundTools({
+      policy: config.foreground,
+      mode: config.schema.mode === "enforce" ? "enforce" : config.fullCodeMode ? "full-code" : "orchestration",
+      managedHost: this.#managedHost !== undefined,
+      registered: this.pi.getAllTools(),
+      active: new Set(active ?? this.pi.getActiveTools()),
+      allowlist: readChildToolAllowlist(),
+    });
   }
 
   get widgetDismissedAt(): number {
@@ -523,6 +539,7 @@ export class FabricState {
         thinking: await this.thinking.load(),
         ...(this.#options.paths ? { paths: this.#options.paths } : {}),
         ...(this.#entryIdentity ? { entryIdentity: this.#entryIdentity } : {}),
+        foregroundTools: () => this.foregroundTools().tools,
       },
     );
   }

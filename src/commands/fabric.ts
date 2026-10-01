@@ -54,6 +54,7 @@ import {
 } from "../entropy/presentation.js";
 import { mergeCompiledSurfaces } from "../entropy/compiled-surface.js";
 import { setActiveCompiledSurface } from "../entropy/active.js";
+import { formatForeground } from "../core/foreground-tools.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -1233,6 +1234,7 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
           config.fullCodeMode && config.capture.enabled
             ? `captured tools: ${capturedTools.size} · model visibility: ${config.capture.hideFromModel ? "hidden" : "visible"}`
             : "captured tools: disabled (native registry preserved)",
+          ...(config.foreground.tools.length > 0 ? [`foreground: ${formatForeground(state.foregroundTools())}`] : []),
           `actors: ${state.actors.list().length} · mesh: ${config.mesh.enabled ? state.mesh.root : "disabled"}`,
           `MCP: ${config.mcp.enabled ? "enabled" : "disabled"}`,
           `UI: ${config.ui.enabled ? `${config.ui.widget} widget above chat` : "disabled"}`,

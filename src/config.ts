@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { renameAtomic } from "./core/atomic-write.js";
 import { approvalActionOverridesValue, type FabricActionApprovalMode } from "./core/approval-overrides.js";
+import { foregroundConfigValue, type FabricForegroundConfig } from "./core/foreground-tools.js";
 import { quarantineDamagedFile } from "./core/damaged-file.js";
 import { normalizeModelAliases, type FabricModelAliases } from "./core/model-resolution.js";
 import { PI_CORE_TOOL_NAME_SET } from "./core/pi-tools.js";
@@ -399,6 +400,8 @@ export interface FabricConfig {
   models: FabricModelsConfig;
   components: FabricComponentEntry[];
   capture: FabricToolCaptureConfig;
+  /** Registered tools full code mode keeps declared beside fabric_exec. */
+  foreground: FabricForegroundConfig;
   ui: FabricUiConfig;
   compaction: FabricCompactionConfig;
   retention: FabricRetentionConfig;
@@ -612,6 +615,7 @@ export const DEFAULT_FABRIC_CONFIG: FabricConfig = {
     mcpAllowlist: [],
   },
   thinking: { bounds: {} },
+  foreground: { tools: [], maxTools: 4 },
   codePreview: defaultCodePreviewSettings(),
 };
 
@@ -1511,6 +1515,8 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
       // Bounds are a ceiling policy: malformed values fail closed.
       bounds: normalizeThinkingBounds(objectValue(input.thinking).bounds, "thinking.bounds"),
     },
+    // Malformed entries fail config loading; semantic refusals report at runtime.
+    foreground: foregroundConfigValue(input.foreground),
     codePreview: normalizeCodePreviewSettings(input.codePreview),
   };
 };
@@ -1721,6 +1727,7 @@ export const saveFabricConfig = (
   // Do not normalize the whole document: saved layers must remain sparse.
   nativeMcpServersValue(objectValue(merged.mcp).nativeServers);
   approvalActionOverridesValue(objectValue(merged.approvals).actions);
+  foregroundConfigValue(merged.foreground);
   // Never stamp down: preserve version markers written by newer builds.
   merged.configVersion = Math.max(
     typeof merged.configVersion === "number" ? merged.configVersion : 0,

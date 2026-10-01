@@ -175,6 +175,8 @@ export interface FabricRuntimeStateOptions {
   thinking?: FabricThinkingController;
   paths?: FabricRuntimePaths;
   entryIdentity?: FabricLoadedFileIdentity;
+  /** Foreground tools declared beside fabric_exec; fences cache holds. */
+  foregroundTools?: () => readonly string[];
 }
 
 export class FabricRuntimeState {
@@ -225,6 +227,7 @@ export class FabricRuntimeState {
   readonly #paths: FabricRuntimePaths | undefined;
   readonly #managedHost: FabricManagedHost | undefined;
   readonly #entryIdentity: FabricLoadedFileIdentity | undefined;
+  readonly #foregroundTools: (() => readonly string[]) | undefined;
   #widgetDismissedAt = 0;
   #suppressResidentGuidanceSync = false;
 
@@ -242,6 +245,7 @@ export class FabricRuntimeState {
     this.#paths = options.paths;
     this.#managedHost = options.managedHost;
     this.#entryIdentity = options.entryIdentity;
+    this.#foregroundTools = options.foregroundTools;
   }
 
   get initialized(): boolean {
@@ -532,7 +536,7 @@ export class FabricRuntimeState {
     await builtins.install(createProviderComponent({
       provider: "cache",
       description: "Local prompt-cache observations and scoped native warming",
-      create: () => new CacheProvider(this.pi, context, identity.kind === "main"),
+      create: () => new CacheProvider(this.pi, context, identity.kind === "main", this.#foregroundTools),
     }));
     await builtins.install(createProviderComponent({
       provider: "thinking",

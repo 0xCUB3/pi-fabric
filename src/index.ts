@@ -58,6 +58,7 @@ import {
   ownsFabricToolSource,
 } from "./core/tool-ownership.js";
 import { readChildToolAllowlist } from "./core/child-tool-allowlist.js";
+import { formatForeground } from "./core/foreground-tools.js";
 import {
   expandSkillDirMarkersForRead,
   expandSkillDirMarkersInSkillBlock,
@@ -307,6 +308,7 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
         registered,
         active: pi.getActiveTools(),
         program: programReachable(new Set(registered)),
+        foreground: state.foregroundTools().tools,
         ...(request.tools ? { tools: request.tools } : {}),
       }));
     },
@@ -1100,16 +1102,30 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
   // set (e.g. a permission system filtering its allowlist at before_agent_start,
   // or a refresh that ran before Fabric's policy was active), captured tools
   // must not leak into the model's next turn.
-  pi.on("before_agent_start", () => {
+  // Foreground refusals are never silent: one notice per session, plus status.
+  let foregroundNoticeSession: string | undefined;
+  pi.on("before_agent_start", (_event, context) => {
     reassertToolOwnership();
+    const foreground = state.foregroundTools();
+    if (foreground.refused.length === 0) return;
+    const sessionId = context.sessionManager?.getSessionId?.() ?? "";
+    if (foregroundNoticeSession === sessionId) return;
+    foregroundNoticeSession = sessionId;
+    const notice = `Fabric foreground policy ${formatForeground(foreground)}`;
+    if (context.hasUI) context.ui.notify(notice, "warning");
+    else console.warn(`[pi-fabric] ${notice}`);
   });
 
   pi.on("context_with_system", (event) => {
     if (!fabricOwnsModelTools()) return;
     reassertToolOwnership();
-    return { messages: fabricModelContext(event.messages, {
+    const foreground = state.foregroundTools().tools;
+    const registered = foreground.length === 0 ? [] : pi.getAllTools();
+    const declared = foreground.flatMap((name) => registered.filter((tool) => tool.name === name)
+      .map(({ description, parameters }) => ({ name, description, parameters })));
+    return { messages: fabricModelContext(event.messages, [{
       name: fabricTool.name, description: fabricTool.description, parameters: fabricTool.parameters,
-    }) };
+    }, ...declared]) };
   });
 
   registerFabricCommand(pi, {

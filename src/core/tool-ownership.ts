@@ -14,15 +14,24 @@ import type {
 } from "../protocol.js";
 import type { ToolLoadout, ToolLoadoutChanges } from "@earendil-works/pi-coding-agent";
 
-// Hide every registered declaration, including historical transcript declarations.
+// Hide every registered declaration, including historical transcript declarations,
+// except resolved foreground tools (full code mode only; enforce resolves none).
 // Keep tools active: Pi 0.99 uses that set for native nested-call availability.
-export const fabricToolLoadout = (loadout: ToolLoadout, exclusive: boolean): ToolLoadoutChanges | undefined =>
-  exclusive ? { hiddenDeclarations: loadout.registered.map((tool) => tool.name).filter((name) => name !== "fabric_exec") } : undefined;
+export const fabricToolLoadout = (
+  loadout: ToolLoadout,
+  exclusive: boolean,
+  foreground: readonly string[] = [],
+): ToolLoadoutChanges | undefined =>
+  exclusive
+    ? { hiddenDeclarations: loadout.registered.map((tool) => tool.name).filter((name) => name !== "fabric_exec" && !foreground.includes(name)) }
+    : undefined;
 
 /**
  * Answer pi-fabric:tool-placement:v1. `model` mirrors fabricToolLoadout: an
- * exclusive mode declares only fabric_exec; orchestration declares the active
- * set. `program` is the caller's view of pi.* / extensions.* reachability.
+ * exclusive mode declares only fabric_exec plus resolved foreground tools;
+ * orchestration declares the active set. `program` is the caller's view of
+ * pi.* / extensions.* reachability; `programCallable` lists `model` tools
+ * that a program can also call.
  */
 export const fabricToolPlacement = (input: {
   mode: FabricToolPlacementMode;
@@ -30,33 +39,40 @@ export const fabricToolPlacement = (input: {
   active: readonly string[];
   program: (name: string) => boolean;
   tools?: readonly string[];
+  foreground?: readonly string[];
 }): FabricToolPlacementResultV1 => {
   const active = new Set(input.active);
   const exclusive = input.mode !== "orchestration";
   const tools: Record<string, FabricToolPlacement> = {};
+  const programCallable: string[] = [];
   for (const name of input.tools ?? input.registered) {
     if (Object.hasOwn(tools, name)) continue;
-    tools[name] = active.has(name) && (!exclusive || name === FABRIC_TOOL_NAME)
-      ? "model"
-      : input.program(name) ? "program" : "unavailable";
+    const program = input.program(name);
+    const model = active.has(name) &&
+      (!exclusive || name === FABRIC_TOOL_NAME || input.foreground?.includes(name) === true);
+    tools[name] = model ? "model" : program ? "program" : "unavailable";
+    if (model && program) programCallable.push(name);
   }
-  return { version: 1, mode: input.mode, tools };
+  return { version: 1, mode: input.mode, tools, ...(programCallable.length > 0 ? { programCallable } : {}) };
 };
 
 // setActiveTools can run during a captured call or in a later extension handler,
 // removing this tool (and thus its loadout hook). Reassert at the native request
 // boundary and project the whole transcript, including historical removals.
+// `tools` is fabric_exec, then any resolved foreground declarations.
 export const fabricModelContext = (
   messages: import("@earendil-works/pi-agent-core").AgentMessage[],
-  tool: Pick<import("@earendil-works/pi-ai").Tool, "name" | "description" | "parameters">,
+  tools: Pick<import("@earendil-works/pi-ai").Tool, "name" | "description" | "parameters">
+    | readonly Pick<import("@earendil-works/pi-ai").Tool, "name" | "description" | "parameters">[],
 ): import("@earendil-works/pi-agent-core").AgentMessage[] => {
+  const declared = Array.isArray(tools) ? [...tools] : [tools];
   let first = true;
   return messages.map((message) => {
     if (message.role !== "system") return message;
     const { toolsAdded: _added, toolsRemoved: _removed, ...rest } = message;
     const declare = first || ("replace" in message && message.replace === true);
     first = false;
-    return { ...rest, ...(declare ? { toolsAdded: [tool] } : {}) };
+    return { ...rest, ...(declare ? { toolsAdded: declared } : {}) };
   });
 };
 
