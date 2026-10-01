@@ -47,7 +47,9 @@ import {
   effectiveToolCaptureConfig,
 } from "./config.js";
 import { registerCompactionHook } from "./compaction/hook.js";
-import { compactAtConfiguredThreshold } from "./compaction/threshold.js";
+import { compactAtConfiguredThreshold, type AutoCompactionTrigger } from "./compaction/threshold.js";
+import { CompactionOwnerObserver } from "./compaction/owner.js";
+import { repairToolResultPairing } from "./compaction/orphan-repair.js";
 import {
   createToolOwnershipReassertion,
   fabricModelContext,
@@ -702,7 +704,12 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
     // so ExtensionRunner does not finish this handler (and Pi does not publish
     // its public agent_settled event) before compaction settles.
     await state.compact.maybeCommit(context);
-    await compactAtConfiguredThreshold(context, state.config);
+    await compactAtConfiguredThreshold(
+      context,
+      state.config,
+      (trigger: AutoCompactionTrigger, committed: boolean) =>
+        state.compact.noteAutoCompaction(trigger, committed),
+    );
     await state.publishHostLifecycle("pi.agent_settled", event);
   });
 
@@ -830,7 +837,21 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
     }
   });
 
+  // Ownership is observed, never contested: the committed entry says who
+  // produced it, and a foreign owner under the Fabric engine earns one
+  // load-order explanation per session.
+  const compactionOwners = new CompactionOwnerObserver();
   pi.on("session_compact", async (event, context) => {
+    const fabricEngine = (state.bootstrapped ? state.config : DEFAULT_FABRIC_CONFIG).compaction.engine === "fabric";
+    const { warning } = compactionOwners.observe(
+      context.sessionManager.getSessionId(),
+      event.compactionEntry,
+      fabricEngine,
+    );
+    if (warning) {
+      if (context.hasUI) context.ui.notify(warning, "warning");
+      else console.warn(`[pi-fabric] ${warning}`);
+    }
     if (!state.initialized) return;
     await state.publishHostLifecycle("pi.session_compact", event);
   });
@@ -855,6 +876,11 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
       state.cwd
         ? state.config.compaction.tokenThresholds[modelKey]
         : DEFAULT_FABRIC_CONFIG.compaction.tokenThresholds[modelKey],
+    getOutputReserveTokens: () =>
+      state.bootstrapped
+        ? state.config.compaction.outputReserveTokens
+        : DEFAULT_FABRIC_CONFIG.compaction.outputReserveTokens,
+    onYield: () => compactionOwners.noteDeliberateYield(),
   });
 
   pi.on("context", (event, context) => {
@@ -895,6 +921,11 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
       });
       return messageChanged ? { ...message, content } : message;
     });
+    const repairOrphans = (state.bootstrapped ? state.config : DEFAULT_FABRIC_CONFIG).compaction.repairOrphans;
+    if (!repairOrphans) return changed ? { messages } : undefined;
+    // Identity-preserving: a defect-free list comes back unchanged.
+    const repaired = repairToolResultPairing(messages);
+    if (repaired.messages !== messages) return { messages: repaired.messages };
     return changed ? { messages } : undefined;
   });
 

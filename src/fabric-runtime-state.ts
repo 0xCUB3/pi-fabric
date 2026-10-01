@@ -565,7 +565,10 @@ export class FabricRuntimeState {
     await builtins.install(createProviderComponent({
       provider: "compact",
       description: "Host context compaction controller",
-      create: () => new CompactProvider(this.#compact!),
+      create: () => new CompactProvider(this.#compact!, {
+        config: () => (this.#config ?? DEFAULT_FABRIC_CONFIG).compaction,
+        appendEntry: (customType, data) => this.pi.appendEntry(customType, data),
+      }),
     }));
     const agentConfig = enforceSchema
       ? { ...this.#config.agents, enabled: false }

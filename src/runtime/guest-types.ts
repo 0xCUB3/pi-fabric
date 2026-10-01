@@ -1223,6 +1223,7 @@ interface FabricCompactPendingIntent {
   requestedBy: string;
   requestedAt: number;
 }
+type FabricCompactionOwner = "fabric" | "pi" | "external" | "none";
 interface FabricCompactLastCommit {
   at: number;
   requestedBy: string;
@@ -1365,7 +1366,27 @@ interface FabricCompactApi {
     instruction?: string;
     requested_by?: string;
   }): Promise<{ requested: true; intent: FabricCompactPendingIntent }>;
-  status(): Promise<{ pending?: FabricCompactPendingIntent; last?: FabricCompactLastCommit }>;
+  status(): Promise<{
+    pending?: FabricCompactPendingIntent;
+    last?: FabricCompactLastCommit;
+    lastAuto?: { at: number; trigger: "headroom" | "tokens" | "ratio"; committed: boolean };
+    owner: FabricCompactionOwner;
+    outputReserveTokens: number;
+  }>;
+  /** Read-only context pressure; never compacts. */
+  pressure(): Promise<{
+    tokens: number | null;
+    contextWindow: number | null;
+    fraction: number | null;
+    headroomTokens: number | null;
+    band: "ok" | "warn" | "urgent" | "unknown";
+    outputReserveTokens: number;
+    thresholdFraction?: number;
+    thresholdTokens?: number;
+    owner: FabricCompactionOwner;
+  }>;
+  /** Persistent carry-forward focus rendered in every Fabric summary until cleared; no args reads. */
+  carry(args?: { items?: string[]; add?: string[]; remove?: string[]; clear?: boolean }): Promise<{ items: string[] }>;
   cancel(): Promise<{ cancelled: true }>;
 }
 

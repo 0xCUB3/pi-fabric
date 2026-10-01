@@ -91,7 +91,9 @@ All calls return promises. Fields ending in `?` are optional; `unknown` marks pr
 | `components.graph()` | `{components:FabricComponentInfo[],edges:Array<{from,to,ref}>,cycles:string[][]}` |
 | `components.reload({id?}?)` | `{components:FabricComponentInfo[]}`; rolls back activation failure when cleanup succeeds |
 | `compact.request(args?)` | `{requested:true,intent:{reason?,instructions?,preserve?,requestedBy,requestedAt}}` |
-| `compact.status()` | `{pending?:CompactIntent,last?:{at,requestedBy,status,summary?,tokensBefore?,estimatedTokensAfter?,error?}}` |
+| `compact.status()` | `{pending?:CompactIntent,last?:{at,requestedBy,status,summary?,tokensBefore?,estimatedTokensAfter?,error?},lastAuto?:{at,trigger,committed},owner,outputReserveTokens}` |
+| `compact.pressure()` | `{tokens,contextWindow,fraction,headroomTokens,band:"ok"\|"warn"\|"urgent"\|"unknown",outputReserveTokens,thresholdFraction?,thresholdTokens?,owner}`; read-only |
+| `compact.carry({items?,add?,remove?,clear?}?)` | `{items}`; no args reads; persistent focus rendered in every Fabric summary until cleared (≤16 items) |
 | `compact.cancel()` | `{cancelled:true}` |
 | `cache.status({target?}?)` | Local session cache observations, live leases, capability/cleanup diagnostics; observations do not prove residency |
 | `cache.hold({target?,durationMs,maxRefreshes?,maxCostUsd?})` | `{status:"held",id,scope,sessionId,model,expiresAt}` or an unsupported/unavailable result with a reason; paid native opt-in, no fallback; cost/count bounds currently unsupported |

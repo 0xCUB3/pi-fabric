@@ -10,7 +10,7 @@ const stableProviderActions = {
   memory: ["recall", "expand", "sessions"],
   state: ["transition", "get", "history", "complexity", "verify", "goal", "checkGoal"],
   schema: ["status", "hypothesize", "verify", "commit", "abort"],
-  compact: ["request", "status", "cancel"],
+  compact: ["request", "status", "pressure", "carry", "cancel"],
   jev: ["evaluate", "run", "spawn", "status", "wait", "join", "advise", "stop"],
 } as const;
 

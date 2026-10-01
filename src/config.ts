@@ -241,11 +241,22 @@ interface FabricUiConfig {
   updateDebounceMs: number;
 }
 
+export interface FabricCompactionPressureBands {
+  warn: number;
+  urgent: number;
+}
+
 interface FabricCompactionConfig {
   engine: FabricCompactionEngine;
   targetContextRatio: number;
   thresholds: Record<string, number>;
   tokenThresholds: Record<string, number>;
+  /** Occupancy fractions reported by `compact.pressure()`; 0 < warn < urgent < 1. */
+  pressureBands: FabricCompactionPressureBands;
+  /** Compact at a settled boundary when window headroom drops below this; 0 disables. */
+  outputReserveTokens: number;
+  /** Drop orphaned tool results and fill missing ones in outgoing context. */
+  repairOrphans: boolean;
 }
 
 export const MIN_COMPACTION_TOKEN_THRESHOLD = 1_000;
@@ -511,6 +522,9 @@ export const DEFAULT_FABRIC_CONFIG: FabricConfig = {
     targetContextRatio: 0.65,
     thresholds: {},
     tokenThresholds: {},
+    pressureBands: { warn: 0.6, urgent: 0.8 },
+    outputReserveTokens: 0,
+    repairOrphans: true,
   },
   retention: {
     orphanedTempRunMs: 6 * 60 * 60 * 1_000,
@@ -719,6 +733,26 @@ const compactionEngineValue = (
   fallback: FabricCompactionEngine,
 ): FabricCompactionEngine =>
   value === "pi" || value === "fabric" ? value : fallback;
+
+// Bands are validated as a pair: any non-finite value or an ordering other
+// than 0 < warn < urgent < 1 falls back to the defaults as a whole.
+const compactionPressureBandsValue = (
+  value: unknown,
+  fallback: FabricCompactionPressureBands,
+): FabricCompactionPressureBands => {
+  const bands = objectValue(value);
+  const warn = bands.warn === undefined ? fallback.warn : bands.warn;
+  const urgent = bands.urgent === undefined ? fallback.urgent : bands.urgent;
+  return typeof warn === "number"
+    && typeof urgent === "number"
+    && Number.isFinite(warn)
+    && Number.isFinite(urgent)
+    && warn > 0
+    && warn < urgent
+    && urgent < 1
+    ? { warn, urgent }
+    : { ...fallback };
+};
 
 const actorScopeValue = (value: unknown, fallback: FabricActorScope): FabricActorScope =>
   value === "project" || value === "session" ? value : fallback;
@@ -1195,6 +1229,20 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
       ),
       thresholds: compactionThresholds,
       tokenThresholds: compactionTokenThresholds,
+      pressureBands: compactionPressureBandsValue(
+        compaction.pressureBands,
+        DEFAULT_FABRIC_CONFIG.compaction.pressureBands,
+      ),
+      outputReserveTokens: boundedInteger(
+        compaction.outputReserveTokens,
+        DEFAULT_FABRIC_CONFIG.compaction.outputReserveTokens,
+        0,
+        MAX_COMPACTION_TOKEN_THRESHOLD,
+      ),
+      repairOrphans: booleanValue(
+        compaction.repairOrphans,
+        DEFAULT_FABRIC_CONFIG.compaction.repairOrphans,
+      ),
     },
     retention: {
       orphanedTempRunMs: boundedInteger(

@@ -24,7 +24,8 @@ import {
   type ProjectionOmittedCounts,
   type Sections,
 } from "./projections.js";
-import { renderSummaryWithMetadata, SUMMARY_SECTIONS } from "./render.js";
+import { CARRY_FORWARD_HEADER, renderSummaryWithMetadata, SUMMARY_SECTIONS } from "./render.js";
+import { carryRequestLines, latestCarryItems } from "./carry.js";
 
 type CompactionEngine = "pi" | "fabric";
 
@@ -573,6 +574,8 @@ export interface FabricCompactionDetailsV2 {
     recall: "session-entry-id-range";
   };
   budget?: FabricCompactionBudgetDetails;
+  /** Carry-forward focus rendered into this summary (absent when the list is empty). */
+  carry?: { count: number; renderedOmittedBytes: number };
   timestamp: string;
 }
 
@@ -762,11 +765,13 @@ export const compileFabricSummary = (
   const sections: Sections = projected.sections;
   runEnrichers(enrichers, source.events, sections);
 
+  const carryLines = carryRequestLines(latestCarryItems(branchEntries));
   const rendered = renderSummaryWithMetadata(sections, {
     firstEntryId: source.range.first,
     lastEntryId: source.range.last,
     lastTimestamp: source.timestamp,
     requestLines: instructions.requestLines,
+    ...(carryLines.length > 0 ? { carryLines } : {}),
   });
   const { summary } = rendered;
   const projectedTokensAfter = cut.budget
@@ -794,9 +799,11 @@ export const compileFabricSummary = (
   const sectionHeaders = SUMMARY_SECTIONS
     .filter(({ key }) => sections[key].length > 0)
     .map(({ header }) => header);
-  if (instructions.requestLines.length > 0) {
-    sectionHeaders.splice(sections.dialogue.length > 0 ? 1 : 0, 0, "[Compaction Request]");
-  }
+  const protectedHeaders = [
+    ...(instructions.requestLines.length > 0 ? ["[Compaction Request]"] : []),
+    ...(carryLines.length > 0 ? [CARRY_FORWARD_HEADER] : []),
+  ];
+  sectionHeaders.splice(sections.dialogue.length > 0 ? 1 : 0, 0, ...protectedHeaders);
 
   const details: FabricCompactionDetailsV2 = {
     compactor: "fabric",
@@ -837,6 +844,9 @@ export const compileFabricSummary = (
       recall: "session-entry-id-range",
     },
     ...(budgetDetails ? { budget: budgetDetails } : {}),
+    ...(carryLines.length > 0
+      ? { carry: { count: carryLines.length, renderedOmittedBytes: rendered.carryOmittedBytes } }
+      : {}),
     timestamp: source.timestamp,
   };
 
@@ -855,6 +865,10 @@ export interface CompactionHookOptions {
   getTargetContextRatio?: () => number;
   getThresholdContextRatio?: (modelKey: string) => number | undefined;
   getThresholdTokens?: (modelKey: string) => number | undefined;
+  /** `compaction.outputReserveTokens`; a breached reserve never defers Pi's threshold compaction. */
+  getOutputReserveTokens?: () => number;
+  /** Fabric deliberately left this compaction to another owner (pi-vcc sentinel/override). */
+  onYield?: () => void;
   enrichers?: readonly CompactionEnricher[];
 }
 
@@ -868,15 +882,27 @@ const notifyInstructionError = (
 
 export const registerCompactionHook = (pi: ExtensionAPI, options: CompactionHookOptions): void => {
   pi.on("session_before_compact", (event: SessionBeforeCompactEvent, context: ExtensionContext) => {
-    if (event.customInstructions === "__pi_vcc__") return;
+    if (event.customInstructions === "__pi_vcc__") {
+      options.onYield?.();
+      return;
+    }
     const { preparation, branchEntries } = event;
     const contextWindow = context?.model?.contextWindow;
     const modelKey = modelCompactionKey(context?.model);
+    const outputReserveTokens = options.getOutputReserveTokens?.() ?? 0;
+    // The headroom trigger is independent of model thresholds: once the
+    // remaining window cannot hold the reserved output, Pi's threshold
+    // compaction proceeds even below a configured Fabric threshold.
+    const reserveBreached = event.reason === "threshold"
+      && outputReserveTokens > 0
+      && typeof contextWindow === "number"
+      && contextWindow - preparation.tokensBefore < outputReserveTokens;
     const thresholdTokens = modelKey === undefined
       ? undefined
       : options.getThresholdTokens?.(modelKey);
     if (
       event.reason === "threshold"
+      && !reserveBreached
       && typeof thresholdTokens === "number"
       && preparation.tokensBefore < thresholdTokens
     ) {
@@ -887,6 +913,7 @@ export const registerCompactionHook = (pi: ExtensionAPI, options: CompactionHook
       : options.getThresholdContextRatio?.(modelKey);
     if (
       event.reason === "threshold"
+      && !reserveBreached
       && typeof threshold === "number"
       && typeof contextWindow === "number"
       && preparation.tokensBefore / contextWindow < threshold
@@ -932,6 +959,7 @@ export const registerCompactionHook = (pi: ExtensionAPI, options: CompactionHook
         return { cancel: true };
       }
       if ((event as SessionBeforeCompactEvent & { _piVccOverriding?: unknown })._piVccOverriding) {
+        options.onYield?.();
         return;
       }
       return { cancel: true };
