@@ -49,6 +49,7 @@ import {
 import { registerCompactionHook } from "./compaction/hook.js";
 import { compactAtConfiguredThreshold, type AutoCompactionTrigger } from "./compaction/threshold.js";
 import type { CompactionOwnerObserver } from "./compaction/owner.js";
+import { unregisteredRunnerNotice } from "./agents/runner-notice.js";
 import {
   createToolOwnershipReassertion,
   fabricModelContext,
@@ -1145,6 +1146,28 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
     if (foregroundNoticeSession === sessionId) return;
     foregroundNoticeSession = sessionId;
     const notice = `Fabric foreground policy ${formatForeground(foreground)}`;
+    if (context.hasUI) context.ui.notify(notice, "warning");
+    else console.warn(`[pi-fabric] ${notice}`);
+  });
+
+  // A configured custom runner is kept even before its extension registers it
+  // (load order), so launches fail closed. Say so before the first turn instead
+  // of at the first agents.run. Registrations live on a globalThis map, so this
+  // check never loads the runner module.
+  let runnerNoticeKey: string | undefined;
+  pi.on("before_agent_start", (_event, context) => {
+    if (!state.bootstrapped) return;
+    const runner = state.config.agents.runner;
+    const notice = unregisteredRunnerNotice(
+      runner,
+      (globalThis as Record<symbol, Map<string, unknown> | undefined>)[
+        Symbol.for("pi-fabric.runnerRegistry.v1")
+      ]?.keys() ?? [],
+    );
+    if (!notice) return;
+    const key = `${context.sessionManager?.getSessionId?.() ?? ""}\0${runner}`;
+    if (runnerNoticeKey === key) return;
+    runnerNoticeKey = key;
     if (context.hasUI) context.ui.notify(notice, "warning");
     else console.warn(`[pi-fabric] ${notice}`);
   });
