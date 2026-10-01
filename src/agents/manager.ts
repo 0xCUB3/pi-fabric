@@ -979,6 +979,7 @@ export class AgentManager {
         ...(writePolicy ? { writePolicy } : {}),
         ...(request.actorId ? { actorId: request.actorId } : {}),
         ...(request.actorName ? { actorName: request.actorName } : {}),
+        ...(scope ? { scope } : {}),
       };
       if (hostedAdapter) {
         return await this.#startHosted(hostedAdapter, launchContext, {

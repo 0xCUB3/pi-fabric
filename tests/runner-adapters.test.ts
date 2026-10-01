@@ -17,6 +17,7 @@ import {
   type FabricWorkerRunner,
 } from "../src/runners.js";
 import type { AgentChildQuestionRequest, AgentRunRecord } from "../src/agents/types.js";
+import { issueRootScope } from "../src/scope.js";
 
 const NONE: FabricRunnerCapabilities = {
   recursiveFabric: false,
@@ -271,6 +272,34 @@ describe("hosted runners", () => {
     expect(result.usage).toMatchObject({ input: 150, output: 30, cost: 0.75 });
     expect(questions[0]?.question).toMatchObject({ method: "select", title: "Ship?", options: ["yes", "no"] });
     expect(fs.readFileSync(path.join(manager.runDirectory(result.id)!, "events.jsonl"), "utf8")).toContain("thinking");
+  });
+
+  it("hands hosted runners the narrowed host scope", async () => {
+    const scopeHolder = globalThis as unknown as Record<symbol, unknown>;
+    const holderKey = Symbol.for("pi-fabric:scope:v1");
+    cleanups.push(() => {
+      delete scopeHolder[holderKey];
+    });
+    const parent = issueRootScope({
+      principal: { id: "svc" },
+      grants: [{ resource: "fs:/repo/**", actions: ["read", "write"] }],
+    });
+    const root = tempRoot();
+    const fake = fakeHosted("scoped", {
+      onStart: (reporter) => reporter.finish({ status: "completed", output: "ok" }),
+    });
+    register(fake.adapter);
+    const manager = managerFor(root);
+    await manager.run({
+      task: "Scoped",
+      runner: "scoped",
+      scope: { grants: [{ resource: "fs:/repo/docs/**", actions: ["read"] }] },
+    });
+    expect(fake.contexts[0]?.scope).toMatchObject({
+      principal: { id: "svc", issuer: "host" },
+      grants: [{ resource: "fs:/repo/docs/**", actions: ["read"] }],
+      parentDigest: parent.digest,
+    });
   });
 
   it("delivers steer through the adapter and refuses undeclared controls", async () => {

@@ -1,4 +1,5 @@
 import type { ImageContent } from "@earendil-works/pi-ai";
+import type { FabricScope } from "../protocol.js";
 import type { FabricKernel } from "../runtime/kernel.js";
 import type { FabricThinking } from "../thinking.js";
 import type { FabricAgentLineage, FabricWritePolicy } from "./child-env.js";
@@ -89,8 +90,8 @@ export interface FabricRunnerLaunchContext {
   writePolicy?: FabricWritePolicy;
   actorId?: string;
   actorName?: string;
-  /** Reserved for a host-issued narrowing scope; Fabric does not set it yet. */
-  scope?: unknown;
+  /** Host-issued scope narrowed for this run (`pi-fabric/scope`); absent for unscoped sessions. */
+  scope?: Readonly<FabricScope>;
 }
 
 export interface FabricWorkerLaunchContext extends FabricRunnerLaunchContext {
