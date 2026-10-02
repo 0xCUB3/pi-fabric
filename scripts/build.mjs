@@ -90,6 +90,7 @@ const lazyEntryPoints = [
   "src/worker/options.ts",
   "src/worker/questions.ts",
   "src/worker/recovery-watchdog.ts",
+  "src/worker/result.ts",
   "src/worker/run-record.ts",
   "src/worker/session-export.ts",
 ];
@@ -128,6 +129,29 @@ const bundledPackages = Object.keys(result.metafile.inputs).filter((input) =>
 );
 if (bundledPackages.length > 0) {
   throw new Error(`Package code was bundled unexpectedly:\n${bundledPackages.join("\n")}`);
+}
+
+// Only the standalone worker gets a private, stateless TypeBox validator.
+// Pi deliberately omits physical host peers; the extension graph above must
+// continue to use Pi's mapped TypeBox, never this isolated artifact.
+const workerResult = await build({
+  entryPoints: ["src/worker/result.ts"],
+  outfile: "dist/worker/result.js",
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  target: "node24",
+  sourcemap: true,
+  metafile: true,
+  banner: { js: "// Worker-only TypeBox validator. MIT (c) 2017-2026 Haydn Paterson; see THIRD_PARTY_NOTICES.md." },
+});
+for (const input of Object.keys(workerResult.metafile.inputs)) {
+  if (input.includes("node_modules/") && !input.includes("node_modules/typebox/")) {
+    throw new Error(`Unexpected worker validator dependency: ${input}`);
+  }
+}
+if (Object.values(workerResult.metafile.outputs).some(output => output.imports.length > 0)) {
+  throw new Error("Worker validator must be self-contained");
 }
 
 const unstableLazyImports = Object.entries(result.metafile.outputs).flatMap(

@@ -4,13 +4,16 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
-import crossSpawn from "cross-spawn";
+import { assertWorkerRuntime, writeWorkerStartupFailure } from "./worker/startup.js";
+
 import { StringDecoder } from "node:string_decoder";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type {
   AgentRunRecord,
   AgentRunStatus,
 } from "./agents/types.js";
+
+let crossSpawn: typeof import("cross-spawn");
 
 const NODE_SCRIPT_EXTENSIONS = new Set([".js", ".cjs", ".mjs", ".ts", ".cts", ".mts"]);
 
@@ -51,11 +54,11 @@ const loadWorkerRecovery = async (): Promise<WorkerRecoveryModule> => {
   return import(sourceModulePath) as Promise<WorkerRecoveryModule>;
 };
 
-type AgentResultModule = typeof import("./agents/result.js");
+type AgentResultModule = typeof import("./worker/result.js");
 
 const loadAgentResult = async (): Promise<AgentResultModule> => {
-  if (!import.meta.url.endsWith(".ts")) return import("./agents/result.js");
-  const sourceModulePath = "./agents/result.ts";
+  if (!import.meta.url.endsWith(".ts")) return import("./worker/result.js");
+  const sourceModulePath = "./worker/result.ts";
   return import(sourceModulePath) as Promise<AgentResultModule>;
 };
 
@@ -198,9 +201,13 @@ let crashContext: { statusFile: string; record: AgentRunRecord } | undefined;
 let runRecordHelpers: WorkerRunRecordModule | undefined;
 let terminalWritten = false;
 const writeCrashStatus = (error: unknown): void => {
-  if (!crashContext || !runRecordHelpers || terminalWritten) return;
+  if (terminalWritten) return;
   try {
-    runRecordHelpers.writeCrashRunRecord(crashContext.statusFile, crashContext.record, error);
+    if (crashContext && runRecordHelpers) {
+      runRecordHelpers.writeCrashRunRecord(crashContext.statusFile, crashContext.record, error);
+    } else {
+      writeWorkerStartupFailure(process.argv, error);
+    }
   } catch {
     // Best effort: if the crash-status write itself fails, #monitor falls back
     // to "Agent transport exited without a result".
@@ -218,6 +225,8 @@ process.on("unhandledRejection", (error) => {
 });
 
 const main = async (): Promise<void> => {
+  assertWorkerRuntime();
+  crossSpawn = (await import("cross-spawn")).default;
   const [optionHelpers, loadedRunRecordHelpers, sessionExportHelpers, {parseStructuredValue, validateAgentResult}, { PiModelControl }, { PiEventProjection }, { PiRecoveryWatchdog }] = await Promise.all([
     loadWorkerOptions(),
     loadWorkerRunRecord(),

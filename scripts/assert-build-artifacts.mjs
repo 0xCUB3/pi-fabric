@@ -66,6 +66,7 @@ const lazy = [
   "worker/event-projection.js",
   "worker/options.js",
   "worker/recovery-watchdog.js",
+  "worker/result.js",
   "worker/run-record.js",
   "worker/session-export.js",
 ];
@@ -127,6 +128,18 @@ const staticClosure = (roots) => {
   return visited;
 };
 
+// Bootstrap diagnostics must survive missing runtime dependencies.
+for (const file of staticClosure([join(dist, "worker.js")])) {
+  for (const match of readFileSync(file, "utf8").matchAll(staticImport)) {
+    if (!match[1].startsWith(".") && !match[1].startsWith("node:")) {
+      throw new Error(`Worker bootstrap imports an external package: ${match[1]}`);
+    }
+  }
+}
+const validator = readFileSync(join(dist, "worker/result.js"), "utf8");
+if ([...validator.matchAll(staticImport)].length || /\bimport\s*\(/.test(validator)) {
+  throw new Error("Worker validator must be self-contained");
+}
 const startupFiles = staticClosure([join(dist, "index.js")]);
 const startupBytes = [...startupFiles].reduce((sum, file) => sum + Buffer.byteLength(readFileSync(file)), 0);
 if (startupBytes > 1150 * 1024 || startupFiles.size > 44) {

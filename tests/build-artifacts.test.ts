@@ -45,6 +45,21 @@ describe("published build artifact guards", () => {
     fs.writeFileSync(file, JSON.stringify(manifest));
     rejected(dir, "Missing or unpackaged public entrypoint: ./dist/missing.js");
   });
+  it("rejects a missing standalone worker validator", () => {
+    const dir = fixture();
+    fs.rmSync(path.join(dir, "dist/worker/result.js"));
+    rejected(dir, "worker/result.js");
+  });
+  it("rejects external dependencies in the worker bootstrap", () => {
+    const dir = fixture();
+    fs.appendFileSync(path.join(dir, "dist/worker.js"), '\nimport "typebox/value";\n');
+    rejected(dir, "Worker bootstrap imports an external package: typebox/value");
+  });
+  it("rejects a validator that relies on host modules", () => {
+    const dir = fixture();
+    fs.appendFileSync(path.join(dir, "dist/worker/result.js"), '\nimport "typebox/value";\n');
+    rejected(dir, "Worker validator must be self-contained");
+  });
   it("rejects a missing lazy Bend grammar entry", () => {
     const dir = fixture();
     fs.rmSync(path.join(dir, "dist/ui/languages/bend.js"));

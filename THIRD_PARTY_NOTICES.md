@@ -1,5 +1,13 @@
 # Third-party notices
 
+## TypeBox 1.3.27
+
+The standalone worker's `dist/worker/result.js` includes the stateless validator
+from [TypeBox](https://github.com/sinclairzx81/typebox), Copyright (c) 2017-2026
+Haydn Paterson, licensed under MIT. This private artifact is not loaded by the
+Pi extension, which continues to use Pi's host-provided TypeBox. The complete
+license is distributed at [docs/licenses/typebox-mit.txt](docs/licenses/typebox-mit.txt).
+
 ## Bend 2.0.34
 
 The generated policy kernel includes Bend's emitted JavaScript trampoline and
