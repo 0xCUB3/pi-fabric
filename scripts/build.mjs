@@ -4,6 +4,7 @@ import { copyFileSync, mkdirSync, readFileSync } from "node:fs";
 
 const primaryEntryPoints = [
   "src/index.ts",
+  "src/extension-bootstrap.ts",
   "src/memory.ts",
   "src/mcp.ts",
   "src/agents.ts",
