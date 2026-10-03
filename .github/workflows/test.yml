@@ -34,6 +34,9 @@ jobs:
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
+            # Non-login Git Bash children warn on stderr when its /tmp is absent.
+            # Keep command output deterministic without stripping real warnings.
+            mkdir -p /tmp
             choco install ripgrep -y --no-progress
           else
             sudo apt-get update
