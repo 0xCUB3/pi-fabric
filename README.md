@@ -1,7 +1,7 @@
 <div align="center">
 
 <p>
-  <img src="https://raw.githubusercontent.com/monotykamary/pi-fabric/main/media/opencollective/logo-dark.svg" alt="Pi Fabric logo" width="96" height="96">
+  <img src="https://raw.githubusercontent.com/monotykamary/pi-fabric/main/media/opencollective/fabric-runtime/fa-avatar.png" alt="Pi Fabric logo" width="96" height="96">
 </p>
 
 # pi-fabric
