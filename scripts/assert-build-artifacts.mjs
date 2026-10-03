@@ -142,9 +142,10 @@ const validator = readFileSync(join(dist, "worker/result.js"), "utf8");
 if ([...validator.matchAll(staticImport)].length || /\bimport\s*\(/.test(validator)) {
   throw new Error("Worker validator must be self-contained");
 }
-const startupFiles = staticClosure([join(dist, "index.js")]);
+// Measure the entry Pi actually loads, including every shared static chunk.
+const startupFiles = staticClosure(manifest.pi.extensions.map(file => resolve(root, file)));
 const startupBytes = [...startupFiles].reduce((sum, file) => sum + Buffer.byteLength(readFileSync(file)), 0);
-if (startupBytes > 1150 * 1024 || startupFiles.size > 44) {
+if (startupBytes > 1000 * 1024 || startupFiles.size > 41) {
   throw new Error(`Startup static graph grew beyond its budget: ${startupBytes} bytes in ${startupFiles.size} files`);
 }
 const optionalPackages = ["yaml", "@lezer/python", "shiki", "@shikijs/langs", "@shikijs/themes", "typescript", "mcporter", "jev-fabric", "@earendil-works/pi-durable", "@earendil-works/chord"];
@@ -163,7 +164,7 @@ if ([...startupFiles].some(file => /class ProviderOperations|Fabric provider ope
 const initialSource = [...startupFiles]
   .map((file) => readFileSync(file, "utf8"))
   .join("\n");
-for (const forbidden of ["src/fabric-runtime-state.ts", "src/prewalk/handoff.ts", "src/jev/client.ts", "src/ui/languages/bend.ts", "src/ui/settings.ts", "src/ui/conversation.ts", "src/ui/conversation-chrome.ts", "src/ui/image-overlays.ts", "src/ui/kitty-viewport.ts", 'from "mcporter"']) {
+for (const forbidden of ["src/entropy/compiler.ts", "src/entropy/trial.ts", "src/fabric-runtime-state.ts", "src/prewalk/handoff.ts", "src/jev/client.ts", "src/ui/languages/bend.ts", "src/ui/settings.ts", "src/ui/conversation.ts", "src/ui/conversation-chrome.ts", "src/ui/image-overlays.ts", "src/ui/kitty-viewport.ts", 'from "mcporter"']) {
   if (initialSource.includes(forbidden)) {
     throw new Error(`Startup static graph contains lazy module marker: ${forbidden}`);
   }

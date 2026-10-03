@@ -45,6 +45,13 @@ describe("published build artifact guards", () => {
     fs.writeFileSync(file, JSON.stringify(manifest));
     rejected(dir, "Missing or unpackaged public entrypoint: ./dist/missing.js");
   });
+  it("checks optional dependencies in the manifest's actual extension entry", () => {
+    const dir = fixture();
+    const manifest = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
+    expect(manifest.pi.extensions).toEqual(["./dist/extension-bootstrap.js"]);
+    fs.appendFileSync(path.join(dir, manifest.pi.extensions[0]), '\nimport "yaml";\n');
+    rejected(dir, "Startup eagerly imports optional dependency yaml");
+  });
   it("rejects a missing standalone worker validator", () => {
     const dir = fixture();
     fs.rmSync(path.join(dir, "dist/worker/result.js"));

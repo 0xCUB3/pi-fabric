@@ -9,7 +9,7 @@ import { defaultCodePreviewSettings } from "../src/ui/code-preview.js";
 describe("prewalk prompt isolation", () => {
   it("does not add prewalk state or guidance to before_agent_start", () => {
     const extensionSource = fs.readFileSync(
-      path.join(process.cwd(), "src", "index.ts"),
+      path.join(process.cwd(), "src", "extension.ts"),
       "utf8",
     );
     const toolSource = fs.readFileSync(
@@ -67,7 +67,7 @@ describe("prewalk prompt isolation", () => {
 
   it("runs handoff from finalized outer message_end without aborting nested calls", () => {
     const extensionSource = fs.readFileSync(
-      path.join(process.cwd(), "src", "index.ts"),
+      path.join(process.cwd(), "src", "extension.ts"),
       "utf8",
     );
     const toolSource = fs.readFileSync(
@@ -84,7 +84,7 @@ describe("prewalk prompt isolation", () => {
   });
 
   it("disarms the captured task from the agent_settled lifecycle", () => {
-    const source = fs.readFileSync(path.join(process.cwd(), "src", "index.ts"), "utf8");
+    const source = fs.readFileSync(path.join(process.cwd(), "src", "extension.ts"), "utf8");
     const start = source.indexOf('pi.on("agent_settled"');
     const end = source.indexOf('pi.on("tool_call"', start);
 
@@ -94,7 +94,7 @@ describe("prewalk prompt isolation", () => {
   });
 
   it("restores the borrowed Main model when a session starts", () => {
-    const source = fs.readFileSync(path.join(process.cwd(), "src", "index.ts"), "utf8");
+    const source = fs.readFileSync(path.join(process.cwd(), "src", "extension.ts"), "utf8");
     const start = source.indexOf('pi.on("session_start"');
     const end = source.indexOf('pi.on("session_tree"', start);
 
