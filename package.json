@@ -127,7 +127,7 @@
   },
   "pi": {
     "extensions": [
-      "./dist/index.js"
+      "./dist/extension-bootstrap.js"
     ],
     "skills": [],
     "image": "https://raw.githubusercontent.com/fabric-runtime/pi-fabric/main/media/banner.svg"

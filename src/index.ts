@@ -629,7 +629,7 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
     while (entropyCompileInFlight) await entropyCompileInFlight;
   };
 
-  pi.on("session_start", async (_event, context) => {
+  const runSessionStart = async (context: ExtensionContext): Promise<void> => {
     await sealScope();
     clearEntropyRetry();
     entropyStopping = false;
@@ -671,6 +671,9 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
     refreshCodePreviewSettings();
     applyFabricMode();
     if (state.shouldEagerlyActivate(context)) await state.ensure(context);
+  };
+  pi.on("session_start", async (_event, context) => {
+    await runSessionStart(context);
   });
 
   // Branch changes move the leaf: emitted echoes and spent reminder budget
@@ -1193,6 +1196,11 @@ export default async function piFabric(pi: ExtensionAPI, options: { managedHost?
     refreshCodePreviewSettings,
     refreshToolDisplay: () => toolDisplay.refresh(),
   });
+  const pendingSession = (globalThis as Record<symbol, unknown>)[Symbol.for("pi-fabric.pending-session.v1")] as { context: ExtensionContext } | undefined;
+  if (pendingSession) {
+    delete (globalThis as Record<symbol, unknown>)[Symbol.for("pi-fabric.pending-session.v1")];
+    await runSessionStart(pendingSession.context);
+  }
 }
 
 export * from "./audit/index.js";
