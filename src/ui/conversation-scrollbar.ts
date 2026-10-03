@@ -75,10 +75,11 @@ export class ConversationScrollbar {
     scrollTo(maxOffset === 0 ? 0 : Math.round(offset / maxOffset * geometry.maxScroll));
   }
 
-  paint(lines: string[]): void {
+  paint(lines: string[], imageRows?: ReadonlySet<number>): void {
     const geometry = this.geometry();
     if (!geometry) return;
     for (let row = 0; row < geometry.height; row++) {
+      if (imageRows?.has(row)) continue;
       let line = lines[row] ?? "";
       if (/\x1b(?:_G|\]1337;File=|P)/.test(line)) continue;
       if (this.view.scrollbar === "always" && this.width > 1 && row < this.contentHeight - this.view.scrollTop) {
