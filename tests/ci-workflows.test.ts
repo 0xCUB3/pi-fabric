@@ -27,6 +27,8 @@ describe("CI Node runtime prerequisites", () => {
     expect(steps[setup].if).toBeUndefined();
     expect(diagnostics).toBeGreaterThan(setup);
     expect(steps[diagnostics].if).toBeUndefined();
+    const prerequisites = steps.find((step: Step) => step.run?.includes("choco install ripgrep"));
+    expect(prerequisites.run).toContain("mkdir -p /tmp");
   });
 
   it.each(workflows)("%s configures the declared Node runtime before install and execution", (file) => {
