@@ -16,6 +16,19 @@ const workflowDirectory = fileURLToPath(new URL(".github/workflows/", root));
 const workflows = fs.readdirSync(workflowDirectory).filter((name) => /\.ya?ml$/.test(name));
 
 describe("CI Node runtime prerequisites", () => {
+  it("runs Python diagnostics with an explicit modern interpreter on both platforms", () => {
+    const workflow = parse(fs.readFileSync(new URL(".github/workflows/test.yml", root), "utf8"));
+    const { steps, strategy } = workflow.jobs.check;
+    expect(strategy.matrix.os).toEqual(["ubuntu-latest", "windows-latest"]);
+    const setup = steps.findIndex((step: Step) => step.uses?.startsWith("actions/setup-python@"));
+    const diagnostics = steps.findIndex((step: Step) => step.run === "bunx vitest run tests/kernel-errors.test.ts");
+    expect(setup).toBeGreaterThanOrEqual(0);
+    expect(steps[setup].with["python-version"]).toBe("3.14");
+    expect(steps[setup].if).toBeUndefined();
+    expect(diagnostics).toBeGreaterThan(setup);
+    expect(steps[diagnostics].if).toBeUndefined();
+  });
+
   it.each(workflows)("%s configures the declared Node runtime before install and execution", (file) => {
     const workflow = parse(fs.readFileSync(new URL(`.github/workflows/${file}`, root), "utf8")) as {
       jobs: Record<string, { steps?: Step[] }>;

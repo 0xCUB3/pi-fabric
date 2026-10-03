@@ -7,7 +7,7 @@ not claims that every terminal behaves identically:
 
 - [pi-traceline's peek pager](https://github.com/tmustier/pine-of-glass/blob/6e7dd5fd613198fee9fff71df1bc45a579030cce/extensions/pi-traceline/drill-pager.ts#L125-L179)
   caches rendered bodies and Image components. Images are atomic: a partly visible
-  block stays a placeholder rather than painting over the pager's chrome. It
+  block stays a placeholder to avoid painting over the pager's chrome. It
   deletes its own image IDs on disposal. This is a safe alternative to cropping,
   but would make Fabric's partially scrolled images disappear by design.
 - [screenshots-picker](https://github.com/thegalexc/pi-extensions-oss/blob/d9d248ce7fbdeff362ef88394fa8372cf9220815/extensions/screenshots-picker/index.ts#L1113-L1255)
@@ -22,7 +22,7 @@ not claims that every terminal behaves identically:
 
 None of these inspected implementations provided a reusable public hook to fix
 Pi's base-conversation/overlay compositor. We retain a scoped Pi 1.0 compatibility
-adapter rather than install a permanent global patch or copy an extension's
+adapter without installing a permanent global patch or copying an extension's
 out-of-band delete loop. The adapter is active only during Fabric custom UI,
 reference-counted across stacked views, and restored even after factory failures.
 
@@ -33,7 +33,7 @@ reference-counted across stacked views, and restored even after factory failures
 - Keep reserved image rows empty. Text selection, scrollbars, and overlay padding
   must not trigger line-clears through a placement after it has been drawn.
 - Suppress background image commands before native compositing. Preserve images
-  wholly outside the visible terminal rather than deleting scrollback to mask a
+  wholly outside the visible terminal; do not delete scrollback to mask a
   panel. The native TUI still owns differential deletion, uploads, and restoration.
 - Do **not** manually delete all images each frame: this can invalidate Pi's
   fullscreen upload cache and cause flicker or expensive retransmissions. Pi's
