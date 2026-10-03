@@ -29,6 +29,7 @@ import {
 } from "./settings-sections.js";
 import type { SettingItem } from "@earendil-works/pi-tui";
 import { openRpcFabricSettings } from "./settings-rpc.js";
+import { imageSafeCustom } from "./image-overlays.js";
 
 const ROOT_ITEM_IDS = [
   "fullCodeMode",
@@ -161,7 +162,7 @@ export async function openFabricSettings(
     context.ui.notify("Fabric settings require an interactive UI", "warning");
     return;
   } else {
-    await context.ui.custom<void>(
+    await imageSafeCustom<void>(context.ui,
       (tui, theme, _keybindings, done) => {
         const component = new FabricSettingsComponent(
           theme,
@@ -182,9 +183,7 @@ export async function openFabricSettings(
         return component;
       },
       {
-        // Draw the settings screen as an overlay. pi composites overlays over
-        // the transcript and clears the cells beneath them; a plain custom
-        // screen leaves native image placements painted over the panel.
+        // Use the same image-safe overlay lifecycle as dashboard and chat.
         overlay: true,
         overlayOptions: {
           width: "94%",
