@@ -195,9 +195,9 @@ export class FabricUiController {
     this.#tasksOpen = true;
     const epoch = this.#epoch;
     try {
-      const { ShellTasksView } = await import("./shell-tasks.js");
+      const [{ ShellTasksView }, { imageSafeCustom }] = await Promise.all([import("./shell-tasks.js"), import("./image-overlays.js")]);
       if (epoch !== this.#epoch) return;
-      await context.ui.custom<void>((tui, theme, keys, done) => {
+      await imageSafeCustom<void>(context.ui, (tui, theme, keys, done) => {
         this.#closeTasks = () => done();
         const id = candidates[0]?.id;
         this.#tasksView = new ShellTasksView({ jobs, theme, keys, done: () => done(), requestRender: () => tui.requestRender(),
@@ -238,8 +238,8 @@ export class FabricUiController {
       const { initializeConversationHost } = await import("./conversation-host.js");
       if (epoch !== this.#epoch) return;
       initializeConversationHost(piConversationHost);
-      const [{ FabricConversationView, FabricConversationState }, { conversationTargets, resolveConversationTarget }, { readConversationAppearance }, { NativeConversationReader }] =
-        await Promise.all([import("./conversation.js"), import("./conversation-targets.js"), import("./conversation-chrome.js"), import("./conversation-native-reader.js")]);
+      const [{ FabricConversationView, FabricConversationState }, { conversationTargets, resolveConversationTarget }, { readConversationAppearance }, { NativeConversationReader }, { imageSafeCustom }] =
+        await Promise.all([import("./conversation.js"), import("./conversation-targets.js"), import("./conversation-chrome.js"), import("./conversation-native-reader.js"), import("./image-overlays.js")]);
       if (epoch !== this.#epoch) return;
       this.#refresh();
       const initialTarget = query?.trim()
@@ -331,7 +331,7 @@ export class FabricUiController {
         }
       };
       this.#schedulePoll(true);
-      await context.ui.custom<void>((tui, theme, keybindings, done) => {
+      await imageSafeCustom<void>(context.ui, (tui, theme, keybindings, done) => {
         if (epoch !== this.#epoch) {
           done(undefined);
           return { render: () => [], invalidate: () => {} };
@@ -421,8 +421,8 @@ export class FabricUiController {
     // from full activity runs rather than stripped summaries.
     this.#dashboardOpen = true;
     this.#refresh();
-    const [{ FabricDashboard }, { buildClaudeModelSource, buildModelSource }] =
-      await Promise.all([import("./dashboard.js"), import("./model-picker.js")]);
+    const [{ FabricDashboard }, { buildClaudeModelSource, buildModelSource }, { imageSafeCustom }] =
+      await Promise.all([import("./dashboard.js"), import("./model-picker.js"), import("./image-overlays.js")]);
     const modelSource = buildModelSource(context.modelRegistry, resolveAgentDir());
     let claudeModelSource: ModelSource | undefined;
     if (this.#snapshot.actors.some((actor) => actor.runner === "claude")) {
@@ -569,7 +569,7 @@ export class FabricUiController {
     let conversationTarget: string | undefined;
     const epoch = this.#epoch;
     try {
-      await context.ui.custom<void>(
+      await imageSafeCustom<void>(context.ui,
         (tui, theme, keybindings, done) => {
           this.#dashboardTui = tui;
           return new FabricDashboard(tui, theme, () => this.#snapshot, () => done(undefined), {
