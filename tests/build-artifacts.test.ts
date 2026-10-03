@@ -65,6 +65,11 @@ describe("published build artifact guards", () => {
     fs.rmSync(path.join(dir, "dist/ui/languages/bend.js"));
     rejected(dir, "ui/languages/bend.js");
   });
+  it("rejects a missing stable image-overlay entry", () => {
+    const dir = fixture();
+    fs.rmSync(path.join(dir, "dist/ui/image-overlays.js"));
+    rejected(dir, "ui/image-overlays.js");
+  });
   it("rejects a missing generated ABI declaration", () => {
     const dir = fixture();
     fs.rmSync(path.join(dir, "dist/verified/generated/storage-kernel.d.ts"));
