@@ -24,6 +24,7 @@ import { defaultConversationTarget } from "./conversation-targets.js";
 import { ConversationTextSelection } from "./conversation-selection.js";
 import { ConversationScrollbar } from "./conversation-scrollbar.js";
 import { ConversationLatest } from "./conversation-latest.js";
+import { isKittyImageLine, KittyViewport, type KittyViewportFrame } from "./kitty-viewport.js";
 import { appendConversationPrompt, conversationPromptHistory } from "./conversation-history.js";
 import { conversationAssistantText, conversationCommandCompletion, CONVERSATION_COMMAND_HELP } from "./conversation-commands.js";
 import { ConversationQueueStore } from "./conversation-queue-store.js";
@@ -248,6 +249,7 @@ export class FabricConversationView implements Component, Focusable {
   private readonly renderer: FabricConversationTranscriptRenderer;
   private readonly scrollbar: ConversationScrollbar;
   private readonly latest = new ConversationLatest();
+  private readonly imageViewport = new KittyViewport();
   private editor: BorderStatusEditor | undefined;
   private suspendedEditor: BorderStatusEditor | undefined;
   private editorEpoch = -1;
@@ -263,7 +265,7 @@ export class FabricConversationView implements Component, Focusable {
   private stopConfirmId: string | undefined;
   private disposed = false;
   private lastBodyLength = 0;
-  private lastBody: string[] = [];
+  private lastBody: readonly string[] = [];
   private lastBodyBudget = 1;
   private editorTop = 0;
   private editorHeight = 0;
@@ -578,27 +580,31 @@ export class FabricConversationView implements Component, Focusable {
     remaining -= queueLines.length;
     this.editorTop = rows - editorLines.length - footer.length - hints.length;
     this.editorHeight = editorLines.length;
-    const body = remaining <= 0 ? [] : this.mode === "picker"
-      ? this.pickerLines(width, remaining)
-      : this.windowBody(transcriptLines, remaining, this.transcriptTail(contentWidth, remaining, editorShowsTopBorder));
+    const window = remaining > 0 && this.mode === "conversation"
+      ? this.windowBody(transcriptLines, remaining, this.transcriptTail(contentWidth, remaining, editorShowsTopBorder))
+      : undefined;
+    const body = window?.lines ?? (remaining > 0 ? this.pickerLines(width, remaining) : []);
     this.bodyTop = head.length;
     const scroll = this.currentId ? this.state.view(this.currentId).scroll : 0;
     this.bodyHeight = this.mode === "conversation" ? Math.max(0, Math.min(remaining, this.lastBody.length - scroll)) : 0;
+    const imageRows = window?.imageRows;
     if (this.textSelection.active) {
-      for (let row = 0; row < this.bodyHeight; row++) body[row] = this.textSelection.highlight(body[row]!, scroll + row, this.theme);
+      for (let row = 0; row < this.bodyHeight; row++) {
+        if (!imageRows?.has(row)) body[row] = this.textSelection.highlight(body[row]!, scroll + row, this.theme);
+      }
     }
     while (body.length < remaining) body.push("");
     if (this.mode === "conversation" && remaining > 0) {
       const entry = this.currentId ? this.state.view(this.currentId) : undefined;
       this.scrollbar.sync(width, this.bodyTop, remaining, this.lastBodyLength, scroll, entry?.following ?? true,
         () => { if (!this.disposed) this.tui.requestRender(); });
-      this.scrollbar.paint(body);
-      this.latest.paint(body, width, this.bodyTop, !!entry && (!entry.following || !!this.observedTranscript?.hasNewer),
+      this.scrollbar.paint(body, imageRows);
+      this.latest.paint(body, width, this.bodyTop, !imageRows?.has(body.length - 1) && !!entry && (!entry.following || !!this.observedTranscript?.hasNewer),
         this.scrollbar.visible, this.theme);
     } else this.scrollbar.reset();
     return [...head, ...body.slice(0, remaining), ...queueLines, ...editorLines, ...footer, ...hints]
       .slice(0, rows)
-      .map((line) => visibleWidth(line) <= width ? line : truncateToWidth(line, width, ""));
+      .map((line) => isKittyImageLine(line) || visibleWidth(line) <= width ? line : truncateToWidth(line, width, ""));
   }
 
   /** Observe files without rendering native history; true means a visible change
@@ -696,6 +702,7 @@ export class FabricConversationView implements Component, Focusable {
     this.observedTranscript = undefined;
     this.lastBody = [];
     this.renderer.dispose();
+    this.imageViewport.clear();
     if (this.ownsMouseMode) {
       this.ownsMouseMode = false;
       this.tui.terminal.write("\x1b[?1002l\x1b[?1000l\x1b[?1006l");
@@ -1478,7 +1485,7 @@ export class FabricConversationView implements Component, Focusable {
     });
   }
 
-  private transcriptLines(innerWidth: number): string[] {
+  private transcriptLines(innerWidth: number): readonly string[] {
     const target = this.currentTarget();
     if (!target || !this.currentId) return [this.theme.fg("dim", "No target selected.")];
     const entry = this.state.view(this.currentId);
@@ -1491,7 +1498,7 @@ export class FabricConversationView implements Component, Focusable {
       outputPad: this.options.appearance?.outputPad ?? 1,
       ...(this.options.appearance?.codeBlockIndent !== undefined ? { codeBlockIndent: this.options.appearance.codeBlockIndent } : {}),
       codePreviewSettings: this.options.codePreviewSettings,
-    });
+    }, "borrow");
   }
 
   private transcriptTail(width: number, budget: number, editorVisible: boolean): string[] {
@@ -1512,7 +1519,7 @@ export class FabricConversationView implements Component, Focusable {
     return tail;
   }
 
-  private windowBody(body: string[], budget: number, tail: string[]): string[] {
+  private windowBody(body: readonly string[], budget: number, tail: string[]): KittyViewportFrame {
     this.lastBodyLength = body.length + tail.length;
     this.lastBody = body;
     this.lastBodyBudget = budget;
@@ -1533,9 +1540,9 @@ export class FabricConversationView implements Component, Focusable {
     // Slice the virtual body + tail without copying retained history per frame.
     const start = entry?.scroll ?? 0;
     const end = start + budget;
-    const lines = body.slice(start, end);
-    if (end > body.length) lines.push(...tail.slice(Math.max(0, start - body.length), end - body.length));
-    return lines;
+    const frame = this.imageViewport.slice(body, start, end);
+    if (end > body.length) frame.lines.push(...tail.slice(Math.max(0, start - body.length), end - body.length));
+    return frame;
   }
 
   private pickerLines(innerWidth: number, budget: number): string[] {
