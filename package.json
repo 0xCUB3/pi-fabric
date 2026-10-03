@@ -115,11 +115,11 @@
   "author": "monotykamary",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/monotykamary/pi-fabric.git"
+    "url": "git+https://github.com/fabric-runtime/pi-fabric.git"
   },
-  "homepage": "https://github.com/monotykamary/pi-fabric#readme",
+  "homepage": "https://github.com/fabric-runtime/pi-fabric#readme",
   "bugs": {
-    "url": "https://github.com/monotykamary/pi-fabric/issues"
+    "url": "https://github.com/fabric-runtime/pi-fabric/issues"
   },
   "engines": {
     "node": ">=24"
@@ -129,7 +129,7 @@
       "./dist/index.js"
     ],
     "skills": [],
-    "image": "https://raw.githubusercontent.com/monotykamary/pi-fabric/main/media/banner.svg"
+    "image": "https://raw.githubusercontent.com/fabric-runtime/pi-fabric/main/media/banner.svg"
   },
   "dependencies": {
     "@jitl/quickjs-singlefile-mjs-release-sync": "^0.32.0",
