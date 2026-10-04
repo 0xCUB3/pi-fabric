@@ -9,9 +9,9 @@ description: >-
 
 # fabric_exec — core reference
 
-One program in the **TypeScript kernel**. Write TypeScript only in `code`. There is **no per-call kernel selector**, language autodetection, or fallback. Only the `return` value reaches the model; `print()` goes to activity logs. `π` is payload data, not a tool.
+One program in the **TypeScript kernel**. Write TypeScript only in `code`. There is **no per-call kernel selector**, language autodetection, or fallback. Returned values and explicitly emitted `print()`/`console` output reach the model; intermediate values stay in the sandbox. `π` is payload data, not a tool.
 
-QuickJS is isolated by default and receives static type checking; native Node/Bun is an explicit trusted-code escape hatch. Do not switch interpreters through shell commands to perform Fabric orchestration. Only the returned value reaches the model; logs go to activity output.
+QuickJS is isolated by default and receives static type checking; native Node/Bun is an explicit trusted-code escape hatch. Do not switch interpreters through shell commands to perform Fabric orchestration. Prefer one compact return value. Explicit log output is also included in the bounded tool result, so do not print raw intermediate payloads.
 
 ## `pi` core tools (full code mode only)
 `pi.<tool>(arg)` — single arg: bare string (primary field) or options object, or a two-arg `(primary, options)` merge for the string-primary tools (`read`/`bash`/`powershell`/`ls`/`grep`/`find`): `pi.read('index.ts', { limit: 120 })` becomes `{ path: 'index.ts', limit: 120 }`, the positional string winning the primary field on conflict; a non-object second arg on those is still a type error. Positional tuple calls are accepted for `grep`/`find` (`pattern, path, limit`), `write` (`path, content`), and `edit` (`path, oldText, newText`).

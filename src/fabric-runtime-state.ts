@@ -1045,6 +1045,7 @@ export class FabricRuntimeState {
       this.capturedTools,
       this.#managedHost ? (name) => this.#managedHost!.ownsProvider(name) : undefined,
     );
+    this.#execution.nativeCodemode.setPersistence((type, data) => this.pi.appendEntry(type, data));
     this.#execution.setParticipantRegistry(this.#providerParticipants);
     const events = this.pi.events;
     if (events) this.#execution.setEventEmitter((channel, data) => events.emit(channel, data));
@@ -1464,6 +1465,7 @@ export class FabricRuntimeState {
     }
     this.#registry = undefined;
     this.#config = undefined;
+    this.#execution?.nativeCodemode.invalidate();
     this.#execution = undefined;
     this.#agents = undefined;
     this.#actors = undefined;
@@ -1573,6 +1575,7 @@ export class FabricRuntimeState {
       await this.#participants?.close();
     }
     this.#registry = undefined;
+    this.#execution?.nativeCodemode.invalidate();
     this.#execution = undefined;
     this.#agents = undefined;
     this.#actors = undefined;

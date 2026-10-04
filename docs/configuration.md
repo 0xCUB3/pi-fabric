@@ -662,6 +662,31 @@ Each entry has three keys:
 
 The `fs` adapter derives each session's `revision` from the SHA-256 of the file bytes, so mtime-only touches keep follow pointers valid while content changes invalidate them. Enumeration is bounded by `memory.maxSessions` and reported through coverage reasons (`fs_source_max_sessions`, `fs_source_scan_capped`); a capped archive is never presented as complete. Ranking, branches, and expansion follow the normal engine paths described in [memory recall](memory-recall.md#portable-host-sources).
 
+## Extractive history (opt-in)
+
+In `/fabric settings`, open **Classifier-assisted extractive history (Jev supported)**. Choose **Consent / mode** and a **Native classifier** from Pi core's registry. Model selection alone does not enable inference. This uses Pi core's `classify()` API, not Fabric's Jev connector.
+
+```json
+{
+  "memory": {
+    "extractive": {
+      "enabled": false,
+      "provider": "typesafe",
+      "model": "jev-latest",
+      "maxViewBytes": 8192,
+      "maxCandidates": 128,
+      "maxSourceChars": 24000,
+      "maxEvaluationsPerTurn": 1,
+      "timeoutMs": 3000
+    }
+  }
+}
+```
+
+Set `enabled: true` to opt in. With `maxEvaluationsPerTurn: 1`, bounded active-branch user/assistant text is sent to the selected classifier and may incur API charges; there is no secret scanner. Set the budget to `0` for local deterministic extraction with no classifier calls. `memory.enabled: false` disables the feature too.
+
+The bounded view preserves complete source quotes, attribution and omission notices. Scores indicate salience, **not truth**. Missing credentials, invalid answers and timeouts fall back deterministically; stale branch/session responses are discarded. It supplements request context without deleting history or replacing Pi compaction, and introduces no generative summarizer. See [Extractive history](extractive-history.md) for bounds and source navigation.
+
 ## Principal and scope
 
 Scope is host-issued and has no config key. A project or global setting cannot grant or widen a principal.
