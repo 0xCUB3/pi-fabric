@@ -43,7 +43,7 @@ export type FabricAgentTransport =
   | "localterm"
   | "herdr";
 /** Built-in runner ids, or a runner registered through pi-fabric/runners. */
-export type FabricAgentRunner = "pi" | "claude" | "veda" | (string & {});
+export type FabricAgentRunner = "pi-durable" | "pi" | "claude" | "veda" | (string & {});
 
 /** How a child run's reported model is checked against the requested key.
  * Strict fails the run on a mismatch. Permissive records the reported
@@ -519,7 +519,7 @@ export const DEFAULT_FABRIC_CONFIG: FabricConfig = {
   },
   agents: {
     enabled: true,
-    runner: "pi",
+    runner: "pi-durable",
     transport: "process",
     claude: { binary: "claude" },
     veda: { binary: "veda", backend: "agy", persona: "navigator-chat" },

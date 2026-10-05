@@ -708,10 +708,10 @@ globalThis.log = workflow.log;
 globalThis.budget = workflow.budget;
 globalThis.rlm = Object.freeze({
   query: (args) => {
-    if (args && args.runner && args.runner !== "pi") {
-      throw new Error("rlm.query requires the Pi runner because recursive Fabric is unavailable in Claude Code");
+    if (args && args.runner && args.runner !== "pi" && args.runner !== "pi-durable") {
+      throw new Error("rlm.query requires a Pi runner (pi-durable or pi) for recursive Fabric");
     }
-    return __budgetedRun({ ...args, runner: "pi", recursive: true });
+    return __budgetedRun({ ...args, runner: args?.runner ?? "pi-durable", recursive: true });
   },
 });
 globalThis.council = Object.freeze({

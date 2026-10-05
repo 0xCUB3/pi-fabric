@@ -845,7 +845,7 @@ export class AgentManager {
         ? this.config.claude.model
         : runner === "veda"
           ? this.config.veda.model
-          : runner === "pi"
+          : (runner === "pi" || runner === "pi-durable")
             ? this.config.model
             : runnerAdapter.defaultModel?.());
     if (runner === "claude" && model) normalizeClaudeModel(model);
@@ -871,7 +871,7 @@ export class AgentManager {
     const admissionSignal = signal ? AbortSignal.any([signal, this.#closeAbort.signal]) : this.#closeAbort.signal;
     const release = await this.#semaphore.acquire("native", admissionSignal);
     try {
-      if (runner === "pi") model = await this.#prepareModel(model);
+      if (runner === "pi" || runner === "pi-durable") model = await this.#prepareModel(model);
       if (this.#closing) throw new Error("Fabric agent manager is closing");
       this.#semaphore.admit(this.#currentDepth + 1);
     } catch (error) {
@@ -966,7 +966,7 @@ export class AgentManager {
       const serializedThinkingBounds = serializeThinkingBounds(thinkingBounds);
       const recursive = capabilities.recursiveFabric && request.recursive === true;
       const extensions = recursive ? true : (request.extensions ?? this.config.extensions);
-      const inheritedSessionPins = runner === "pi" && extensions
+      const inheritedSessionPins = (runner === "pi" || runner === "pi-durable") && extensions
         ? this.#inheritedSessionPins(request)
         : undefined;
       // In a full-code parent every extension-enabled Pi child runs Fabric
@@ -1868,7 +1868,7 @@ export class AgentManager {
       managed.abortSignal?.aborted ||
       record.status !== "failed" ||
       !(
-        (managed.runner === "pi" && retryablePiStartupError(record.error)) ||
+        ((managed.runner === "pi" || managed.runner === "pi-durable") && retryablePiStartupError(record.error)) ||
         transportExitedWithoutResult(record.error)
       ) ||
       record.turns !== 0 ||
@@ -1925,7 +1925,11 @@ export class AgentManager {
     managed.resumeAttempts += 1;
     const { turns, toolCalls, usage } = managed.observedProgress;
     return this.#relaunch(managed, record, {
-      task: resumeTask(managed.task, record, { turns, toolCalls }, managed.runDirectory),
+      // Durable recovery reopens the same journal, not a fresh conversation.
+      // Changing its prompt breaks recorded-result identity after completion.
+      task: managed.runner === "pi-durable"
+        ? managed.task
+        : resumeTask(managed.task, record, { turns, toolCalls }, managed.runDirectory),
       carryOver: { turns, toolCalls, usage: { ...usage } },
     });
   }
@@ -1942,7 +1946,7 @@ export class AgentManager {
     resume?: { task: string; carryOver: AgentRunCarryOver },
   ): Promise<boolean> {
     try {
-      if (managed.runner === "pi") {
+      if (managed.runner === "pi" || managed.runner === "pi-durable") {
         const model = await this.#prepareModel(managed.model);
         const modelIndex = managed.launch.workerArguments.indexOf("--model");
         if (model) {
