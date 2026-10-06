@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentManager } from "../src/agents/manager.js";
 import { DEFAULT_FABRIC_CONFIG } from "../src/config.js";
 import type { AgentRunRecord } from "../src/agents/types.js";
+import { hostPeerNodePath } from "../src/host-package.js";
 
 const roots: string[] = [];
 const managers: AgentManager[] = [];
@@ -141,5 +142,41 @@ describe("standalone worker without Pi host peers", () => {
     expect(result.status).toBe("failed");
     expect(result.error).toContain("options.js");
     expect(result.error).not.toContain("transport exited without a result");
+  });
+});
+
+describe("durable worker without Pi host peers", () => {
+  // A Pi-managed install: Fabric's own dependencies (pi-durable hoists pi-ai)
+  // but none of the host peers the durable worker imports by name.
+  const durableInstallation = () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "fabric-durable-install-"));
+    roots.push(root);
+    fs.cpSync(path.resolve("dist"), path.join(root, "dist"), { recursive: true });
+    fs.writeFileSync(path.join(root, "package.json"), '{"type":"module"}');
+    fs.mkdirSync(path.join(root, "node_modules/@earendil-works"), { recursive: true });
+    for (const name of ["cross-spawn", "@earendil-works/pi-durable", "@earendil-works/chord", "@earendil-works/pi-ai"]) {
+      fs.symlinkSync(fs.realpathSync(path.join("node_modules", name)), path.join(root, "node_modules", name), process.platform === "win32" ? "junction" : "dir");
+    }
+    const host = fs.realpathSync("node_modules/@earendil-works/pi-coding-agent");
+    const run = (runtime: string, extra: string[] = [], env: NodeJS.ProcessEnv = {}) => spawnSync(runtime, [
+      path.join(root, "dist/durable/worker.js"), "--mode", "rpc", "--durable-directory", path.join(root, "durable"),
+      "--durable-run-id", "probe", "--no-extensions", "--no-tools", ...extra,
+    ], { cwd: root, input: "", encoding: "utf8", timeout: 20000, env: { ...process.env, NODE_PATH: "", ...env } });
+    return { host, run };
+  };
+
+  it("resolves host peers from --pi-package-dir under Node", () => {
+    const { host, run } = durableInstallation();
+    expect(run(process.execPath).stderr).toContain("Cannot find package '@earendil-works/pi-coding-agent'");
+    const fixed = run(process.execPath, ["--pi-package-dir", host]);
+    expect(fixed.stderr).not.toContain("Durable Pi worker failed");
+  });
+
+  const bun = spawnSync("bun", ["--version"], { timeout: 5000 }).status === 0;
+  it.skipIf(!bun)("resolves host peers from the launcher's NODE_PATH under Bun", () => {
+    const { host, run } = durableInstallation();
+    expect(run("bun").stderr).toContain("Cannot find package '@earendil-works/pi-coding-agent'");
+    const fixed = run("bun", ["--pi-package-dir", host], { NODE_PATH: hostPeerNodePath(host) });
+    expect(fixed.stderr).not.toContain("Durable Pi worker failed");
   });
 });

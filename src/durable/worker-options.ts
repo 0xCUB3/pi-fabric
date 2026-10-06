@@ -13,6 +13,7 @@ export interface DurableWorkerOptions {
   extensions: string[];
   noExtensions: boolean;
   appendSystemPrompt: string;
+  piPackageDir?: string;
 }
 
 /** Internal worker protocol, deliberately not a second general-purpose Pi CLI. */
@@ -26,7 +27,7 @@ export function parseDurableWorkerOptions(argv: readonly string[], cwd = process
     if (flag === "--no-session") continue;
     if (flag === "--no-extensions") { options.noExtensions = true; continue; }
     if (flag === "--no-tools") { options.noTools = "all"; continue; }
-    if (!["--mode", "--durable-directory", "--durable-run-id", "--session", "--model", "--provider", "--thinking", "--tools", "-e", "--extension", "--append-system-prompt"].includes(flag)) {
+    if (!["--mode", "--durable-directory", "--durable-run-id", "--session", "--model", "--provider", "--thinking", "--tools", "-e", "--extension", "--append-system-prompt", "--pi-package-dir"].includes(flag)) {
       throw new Error(`Unsupported durable worker option: ${flag}`);
     }
     const value = argv[++i];
@@ -45,6 +46,7 @@ export function parseDurableWorkerOptions(argv: readonly string[], cwd = process
       case "--tools": options.tools = value.split(",").map(tool => tool.trim()).filter(Boolean); break;
       case "-e": case "--extension": options.extensions.push(value.startsWith("builtin:") ? value : path.resolve(cwd, value)); break;
       case "--append-system-prompt": prompts.push(value); break;
+      case "--pi-package-dir": options.piPackageDir = path.resolve(cwd, value); break;
     }
   }
   if (!options.directory || !options.runId) throw new Error("Durable workers require --durable-directory and --durable-run-id");

@@ -1,9 +1,11 @@
 #!/usr/bin/env node
+import { installHostPeerFallback } from "./host-peers.js";
 import { parseDurableWorkerOptions } from "./worker-options.js";
 
 try {
   // This process-only entry is never imported by extension registration.
   const options = parseDurableWorkerOptions(process.argv.slice(2));
+  if (options.piPackageDir) installHostPeerFallback(options.piPackageDir);
   const { runDurableWorker } = await import("./worker-host.js");
   await runDurableWorker(options);
 } catch (error) {
