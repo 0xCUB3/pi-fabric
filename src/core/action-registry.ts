@@ -1033,7 +1033,7 @@ export class ActionRegistry {
       try {
       if (this.#speculation && this.#allowsSpeculation(action)) {
         const served = await runAbortable(context.signal, () =>
-          this.#speculation!.tryServe(context.parentToolCallId, ref, snapshotArguments(catalog.args), JSON.stringify([binding.id, authority.descriptor, context.capabilityView?.id ?? null, context.scope?.digest ?? null])));
+          this.#speculation!.tryServe(context.parentToolCallId, ref, snapshotArguments(catalog.args), JSON.stringify([binding.id, authority.descriptor, context.capabilityView?.id ?? null, context.scope?.digest ?? null, context.nativeToolResult === true])));
         if (served.hit) {
           providerValue = await runAbortable(context.signal, () => this.#runPlanned(binding, providerActionName, authority, "replay", catalog.args, context, served.value));
           servedFromSpeculation = true;
@@ -1248,7 +1248,7 @@ export class ActionRegistry {
       }));
       return {
         get preparedArgs() { return snapshotArguments(repairedArgs); },
-        bindingToken: JSON.stringify([binding.id, authority.descriptor, context.capabilityView?.id ?? null, context.scope?.digest ?? null]),
+        bindingToken: JSON.stringify([binding.id, authority.descriptor, context.capabilityView?.id ?? null, context.scope?.digest ?? null, context.nativeToolResult === true]),
         execute: async signal => {
           const combined = AbortSignal.any([context.signal!, ...(signal ? [signal] : [])]);
           const actual = execute(combined);

@@ -70,8 +70,8 @@ const quickJsModule = (): Promise<QuickJsModule> => {
   return quickJsModulePromise;
 };
 
-export const guestSetupSource = (fields?: Record<string, string[]>, nativeStoreEnabled = false): string =>
-  `const __piCanonicalFields = ${JSON.stringify(fields ?? {})}; const __nativeStoreEnabled = ${nativeStoreEnabled};\n${GUEST_SETUP}`;
+export const guestSetupSource = (fields?: Record<string, string[]>, nativeStoreEnabled = false, profile = "additive", nativeToolsEnabled = false): string =>
+  `const __piCanonicalFields = ${JSON.stringify(fields ?? {})}; const __nativeStoreEnabled = ${nativeStoreEnabled}; const __nativeProfile = ${profile === "native"}; const __nativeToolsEnabled = ${nativeToolsEnabled};\n${GUEST_SETUP}`;
 
 import { NATIVE_CODEMODE_GUEST } from "./native-codemode-guest.js";
 
@@ -100,7 +100,6 @@ const __call = async (ref, args) => {
   __recordSuccessfulCall(ref, normalizedArgs);
   return value;
 };
-const __piToolNames = ["read","bash","powershell","edit","write","grep","find","ls"];
 const __toolsBase = {
   providers: () => __call("fabric.$providers", {}),
   catalog: (args = {}) => __call("fabric.$catalog", args),
@@ -115,26 +114,28 @@ const __toolsBase = {
   models: () => __call("fabric.$models", {}),
 };
 ${NATIVE_CODEMODE_GUEST}
-// tools is discovery + generic calls only. The proxy keeps the seven discovery
-// methods and turns a core-tool name (read/bash/edit/...) into an actionable
-// error pointing at pi.<name>, so a model that writes tools.read(...) learns
-// the fix in one turn instead of looping on "tools.read is not a function".
-globalThis.tools = new Proxy(__toolsBase, {
+const __nativeToolNames = new Set();
+let __nativeCatalogReady = false;
+globalThis.nativeTools = new Proxy(Object.create(null), {
+  get(_target, property) {
+    if (typeof property === "symbol" || (__nativeCatalogReady ? !__nativeToolNames.has(property) : property === "then")) return undefined;
+    return args => __call("fabric.$nativeTool", { name: String(property), args: args === undefined ? {} : args });
+  },
+  ownKeys() { return [...__nativeToolNames]; },
+  getOwnPropertyDescriptor(_target, property) { return __nativeToolNames.has(property) ? {enumerable:true, configurable:true} : undefined; },
+  set() { return true; },
+  deleteProperty() { return true; },
+});
+const __fabricTools = new Proxy(__toolsBase, {
   get(target, property) {
     if (property === "then" || typeof property === "symbol") return undefined;
-    const name = String(property);
-    if (__piToolNames.indexOf(name) >= 0) {
-      return () => {
-        throw new Error(
-          "tools." + name + " is not available on the discovery API. tools is discovery + generic calls only (providers/catalog/list/search/describe/call/models). For the Pi core tool, call pi." + name + "(args), e.g. pi." + name + "({ ... })."
-        );
-      };
-    }
-    return target[property];
+    return Object.prototype.hasOwnProperty.call(target, property) ? target[property] : globalThis.nativeTools[property];
   },
   set() { return true; },
   deleteProperty() { return true; },
 });
+globalThis.fabric = Object.freeze({ tools: __fabricTools });
+globalThis.tools = typeof __nativeProfile !== "undefined" && __nativeProfile ? globalThis.nativeTools : __fabricTools;
 const __piStringFields = { bash: "command", powershell: "command", read: "path", ls: "path", grep: "pattern", find: "pattern" };
 // Object aliases and coercions are shared with host preparation in core/pi-arguments.ts.
 
@@ -1094,7 +1095,7 @@ export class QuickJsRuntime {
       tokenBudget.dispose();
 
       cpuDeadlineAt = Date.now() + (options.maxCpuSliceMs ?? Infinity);
-      const setupResult = context.evalCode(guestSetupSource(options.piToolCanonicalFields, options.nativeStoreEnabled), "pi-fabric-setup.js");
+      const setupResult = context.evalCode(guestSetupSource(options.piToolCanonicalFields, options.nativeStoreEnabled, options.codemodeProfile, options.nativeToolsEnabled), "pi-fabric-setup.js");
       if (setupResult.error) {
         const deadlineExceeded = interruptedByDeadline || interruptedByCpu || Date.now() > executionDeadlineAt;
         if (deadlineExceeded) timedOut = true;

@@ -1155,6 +1155,8 @@ export class FabricRuntimeState {
         return current.schema.mode !== "enforce" || schemaRefAllowedInEnforce(ref);
       },
       config.executor.kernel,
+      () => this.capturedTools.registeredTools().map(entry => entry.definition),
+      () => this.#config?.executor.codemodeProfile === "native",
     );
   }
 

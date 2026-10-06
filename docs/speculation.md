@@ -62,7 +62,7 @@ ActionRegistry.speculate()       src/core/action-registry.ts
   │  resolve → gate → prepareArguments → validate → provider.invoke
   ▼
 FabricSpeculationStore           src/speculation/store.ts
-  │  keyed by (parentToolCallId, ref, stableJsonHash(preparedArgs));
+  │  keyed by (parentToolCallId, ref, stableJsonHash(preparedArgs), bindingToken);
   │  per-entry AbortController, freshness checker, side-channel replay sink
   ▼
 ActionRegistry.invoke()          serve-or-reexecute at the real call site
@@ -113,6 +113,12 @@ Observable differences show up only in observability surfaces: audits record
 `speculated: true` on served calls, and side-channel outputs captured during
 the speculative invoke (`attachMedia`, `updateArguments`, `attachPreview`) are
 replayed into the real audit.
+
+## Native codemode aliases
+
+Both `executor.codemodeProfile` values support literal native reads through `tools` and `nativeTools`. The scanner resolves core aliases and known Pi MCP registration identifiers to their canonical Fabric refs before eligibility checks. Unknown or ambiguous aliases skip speculation rather than guessing; the actual call still uses normal dispatch. Native facade aliasing/mutation conservatively taints that root.
+
+The binding token includes the result projection (`native` versus Fabric), alongside provider generation, descriptor, capability view and scope. Identical arguments can therefore warm both views without crossing their result or side-channel contracts. Native reads repeat the same live policy gates at launch and serve; model calls and writes do not become eligible through another spelling. Profile changes reset the cache and streaming state, like kernel/policy changes.
 
 ## Entropy compile interplay
 

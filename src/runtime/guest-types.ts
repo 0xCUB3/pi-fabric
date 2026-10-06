@@ -411,6 +411,7 @@ interface FabricActionSearchEnvelope {
   backend: FabricActionSearchBackend;
 }
 interface FabricToolsApi {
+  [name: string]: any;
   providers(): Promise<Array<{ name: string; description: string }>>;
   catalog(args?: { provider?: string; limit?: number }): Promise<FabricCapabilityCatalog>;
   /**
@@ -1568,6 +1569,8 @@ interface FabricWorkflowApi {
   budget: { total: number; spent(): number; remaining(): number };
 }
 declare const tools: FabricToolsApi;
+declare const nativeTools: Record<string, (args?: Record<string, unknown>) => Promise<any>>;
+declare const fabric: { readonly tools: FabricToolsApi };
 declare const pi: PiToolsApi;
 declare const extensions: FabricExtensionsApi;
 declare const agents: FabricAgentsApi;

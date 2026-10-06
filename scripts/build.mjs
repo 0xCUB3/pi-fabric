@@ -45,6 +45,8 @@ const lazyEntryPoints = [
   "src/durable/worker-host.ts",
   "src/type-error-guidance.ts",
   "src/native-discovery.ts",
+  "src/native-tool-catalog.ts",
+  "src/native-image-artifacts.ts",
   "src/memory/extractive-history.ts",
   "src/cli/mesh.ts",
   "src/cli/decisions.ts",

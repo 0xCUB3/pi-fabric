@@ -543,6 +543,8 @@ export type FabricMessageSender =
     };
 
 export interface FabricInvocationContext {
+  /** Host-selected result projection; never an action argument or an authority grant. */
+  nativeToolResult?: boolean;
   cwd: string;
   signal: AbortSignal | undefined;
   parentToolCallId: string;

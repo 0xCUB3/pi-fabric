@@ -33,6 +33,8 @@ const stable = [
 ];
 const lazy = [
   "native-discovery.js",
+  "native-tool-catalog.js",
+  "native-image-artifacts.js",
   "memory/extractive-history.js",
   "cli/mesh.js",
   "cli/decisions.js",

@@ -1,4 +1,5 @@
 import path from "node:path";
+import { nativeToolResult } from "../core/native-tool-result.js";
 import { readChildToolAllowlist } from "../core/child-tool-allowlist.js";
 import { runAbortable, throwIfAborted } from "../async-settlement.js";
 import type { AgentToolResult, SourceInfo } from "@earendil-works/pi-coding-agent";
@@ -143,12 +144,13 @@ export class CapturedToolsProvider implements FabricProvider {
     actionName: string,
     args: Record<string, unknown>,
     context: FabricInvocationContext,
-  ): Promise<CapturedToolInvocationResult> {
+  ): Promise<unknown> {
     this.#assertAllowed(actionName);
     const entry = this.catalog.require(actionName);
-    return this.#scheduler.run(entry.definition.executionMode, () =>
+    const result = await this.#scheduler.run(entry.definition.executionMode, () =>
       runAbortable(context.signal, () => this.#invokeCaptured(entry, args, context)),
     );
+    return context.nativeToolResult ? nativeToolResult(entry.definition, result, result.isError) : result;
   }
 
   #assertAllowed(name: string): void {
@@ -183,9 +185,9 @@ export class CapturedToolsProvider implements FabricProvider {
       this.catalog.remove(activeBefore.filter((name) => !activeAfter.has(name)));
       context.updateArguments?.(outcome.toolCall.arguments);
       const images = outcome.result.content.filter((part) => part.type === "image");
-      if (images.length) context.attachMedia?.(images);
-      if (outcome.isError) throw new Error(textFromContent(outcome.result.content) || `Captured tool ${entry.name} failed`);
-      return asInvocationResult(entry, outcome.result, false);
+      if (images.length && !context.nativeToolResult) context.attachMedia?.(images);
+      if (outcome.isError && !(context.nativeToolResult && entry.definition.outputSchema && outcome.result.structuredContent !== undefined)) throw new Error(textFromContent(outcome.result.content) || `Captured tool ${entry.name} failed`);
+      return asInvocationResult(entry, outcome.result, outcome.isError);
     }
     const toolCallId = context.nestedToolCallId;
     await runAbortable(context.signal, () => runner.emit({
@@ -285,8 +287,8 @@ export class CapturedToolsProvider implements FabricProvider {
     // Keep observations emitted before a failed batch as well as successful
     // results. Hooks have already produced the final model-facing content.
     const images = result.content.filter((part) => part.type === "image");
-    if (images.length > 0) context.attachMedia?.(images);
-    if (isError) {
+    if (images.length > 0 && !context.nativeToolResult) context.attachMedia?.(images);
+    if (isError && !(context.nativeToolResult && entry.definition.outputSchema && result.structuredContent !== undefined)) {
       if (isPiShellToolName(entry.name)) {
         throw piBashResultError(thrown, textFromContent(result.content));
       }
@@ -295,6 +297,6 @@ export class CapturedToolsProvider implements FabricProvider {
         text || (thrown instanceof Error ? thrown.message : `Captured tool ${entry.name} failed`),
       );
     }
-    return asInvocationResult(entry, result, false);
+    return asInvocationResult(entry, result, isError);
   }
 }

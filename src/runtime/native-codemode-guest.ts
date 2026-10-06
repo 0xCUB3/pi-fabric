@@ -13,6 +13,18 @@ globalThis.ALL_TOOLS = Object.freeze([]);
 globalThis.searchTools = (query, options = {}) => __call("fabric.$nativeSearch", { query, ...options });
 globalThis.describeTool = name => __call("fabric.$nativeDescribe", { name });
 globalThis.describeNamespace = name => __call("fabric.$describeNamespace", { name });
+let __nativeAllTools = Object.freeze([]);
+globalThis.nativeDiscovery = Object.freeze({
+  get ALL_TOOLS() { return __nativeAllTools; },
+  searchTools: (query, options = {}) => __call("fabric.$piSearch", { query, ...options }),
+  describeTool: name => __call("fabric.$piDescribe", { name }),
+  describeNamespace: name => __call("fabric.$piNamespace", { name }),
+});
+if (typeof __nativeProfile !== "undefined" && __nativeProfile) {
+  globalThis.searchTools = globalThis.nativeDiscovery.searchTools;
+  globalThis.describeTool = globalThis.nativeDiscovery.describeTool;
+  globalThis.describeNamespace = globalThis.nativeDiscovery.describeNamespace;
+}
 const __exit = Object.freeze({});
 let __storeValues;
 let __storeDirty = false;
@@ -66,8 +78,14 @@ globalThis.image = value => {
 };
 globalThis.exit = () => { throw __exit; };
 globalThis.__fabricRun = async (main) => {
+  if (typeof __nativeToolsEnabled !== "undefined" && __nativeToolsEnabled) {
+    __nativeAllTools = Object.freeze(await __call("fabric.$piAllTools", {}));
+    for (const tool of __nativeAllTools) __nativeToolNames.add(tool.name);
+    __nativeCatalogReady = true;
+    if (__nativeProfile) globalThis.ALL_TOOLS = __nativeAllTools;
+  }
   if (typeof __nativeStoreEnabled !== "undefined" && __nativeStoreEnabled) {
-    globalThis.ALL_TOOLS = Object.freeze(await __call("fabric.$allTools", {}));
+    if (!(typeof __nativeProfile !== "undefined" && __nativeProfile)) globalThis.ALL_TOOLS = Object.freeze(await __call("fabric.$allTools", {}));
     try { __storeValues = Object.assign(Object.create(null), await __call("native.load", {})); }
     catch (error) { __storeError = error; }
   }

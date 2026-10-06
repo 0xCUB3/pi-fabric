@@ -192,13 +192,16 @@ export class PiNativeMcpTools {
       context.updateArguments?.(outcome.toolCall.arguments);
       const result = outcome.result;
       const images = result.content.filter(part => part.type === "image");
-      if (images.length) context.attachMedia?.(images);
+      if (images.length && !context.nativeToolResult) context.attachMedia?.(images);
       // A content-only redaction removes structuredContent in Pi. Never resurrect the raw result.
       const raw = result.structuredContent;
       const envelope = raw && typeof raw === "object" && Array.isArray((raw as Record<string, unknown>).content)
         ? raw as Record<string, unknown>
         : { content: result.content, ...(raw !== undefined ? { structuredContent: raw } : {}) };
-      return normalizeMcpResult({ ...envelope, ...(outcome.isError ? { isError: true } : {}) });
+      if (context.nativeToolResult && outcome.isError && result.structuredContent === undefined) {
+        throw new Error(result.content.filter(part => part.type === "text").map(part => part.text).join("\n") || "MCP tool failed");
+      }
+      return normalizeMcpResult({ ...envelope, ...(outcome.isError ? { isError: true } : {}) }, context.nativeToolResult);
     } finally {
       this.#calls.delete(deadline);
       clearTimeout(timer);

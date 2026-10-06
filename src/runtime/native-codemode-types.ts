@@ -30,6 +30,12 @@ declare const ALL_TOOLS: readonly NativeToolInfo[];
 declare function searchTools(query: string, options?: { limit?: number; namespace?: string }): Promise<NativeToolInfo[]>;
 declare function describeTool(name: string): Promise<(NativeToolInfo & { declaration: string }) | undefined>;
 declare function describeNamespace(name: string): Promise<{ name: string; description?: string; instructions?: string; tools: NativeToolInfo[] } | undefined>;
+declare const nativeDiscovery: {
+ readonly ALL_TOOLS: readonly NativeToolInfo[];
+ searchTools(query: string, options?: {limit?: number; namespace?: string}): Promise<NativeToolInfo[]>;
+ describeTool(name: string): Promise<string | undefined>;
+ describeNamespace(name: string): Promise<{name: string; description?: string; instructions?: string; tools: string[]} | undefined>;
+};
 declare const models: FabricNativeModels;
 declare function store(key: string, value: unknown): void;
 declare function load<T = unknown>(key: string): T | undefined;

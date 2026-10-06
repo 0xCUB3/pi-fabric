@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { nativeToolResult } from "../core/native-tool-result.js";
 import path from "node:path";
 import * as PiCodingAgent from "@earendil-works/pi-coding-agent";
 import {
@@ -570,7 +571,7 @@ export class PiToolsProvider implements FabricProvider {
     void job.readPid();
     let spilled = false;
     const outcome = await raceShellHang({
-      hangMs: background ? 0 : this.#shellHangMs(),
+      hangMs: background || context.nativeToolResult ? 0 : this.#shellHangMs(),
       immediate: background,
       parentSignal: context.signal,
       job,
@@ -669,7 +670,7 @@ export class PiToolsProvider implements FabricProvider {
       const intercepted = await tryExecuteGitWorktreeAdd(args, this.#cwd);
       if (intercepted) {
         this.#attachPreview(name, intercepted, args, context);
-        return this.#normalizeResult(name, intercepted, args);
+        return this.#normalizeResult(name, intercepted, args, context);
       }
       // Parsed but not intercepted (e.g. outside a git repo): fall through to a
       // normal execution. The preflight already fired, so downstream must not
@@ -684,11 +685,13 @@ export class PiToolsProvider implements FabricProvider {
       if (isPiShellToolName(name) && args.notify !== undefined) throw new Error("notify requires durable:true");
       // `durable` is Fabric's own argument; an override never sees it.
       const { durable: _durable, ...overrideArgs } = args;
-      const result = await this.#capturedTools!.invoke(name, overrideArgs, context);
+      const value = await this.#capturedTools!.invoke(name, overrideArgs, context);
+      if (context.nativeToolResult) return value;
+      const result = value as import("./captured-tools-provider.js").CapturedToolInvocationResult;
       this.#attachReadMedia(name, result, context);
       this.#attachReadNote(name, result, context);
       this.#attachPreview(name, result, args, context);
-      return this.#normalizeResult(name, result, args);
+      return this.#normalizeResult(name, result, args, context);
     }
     const tool = this.#definitionFor(name, args);
     // Without a runner (e.g. before the first tool refresh populated the
@@ -706,11 +709,11 @@ export class PiToolsProvider implements FabricProvider {
         throwIfAborted(context.signal);
         throw isPiShellToolName(name) ? classifyPiBashError(error) : error;
       });
-      if (result.isError && isPiShellToolName(name)) throw classifyPiBashResult(result);
+      if (result.isError && isPiShellToolName(name) && !(context.nativeToolResult && tool.outputSchema && result.structuredContent !== undefined)) throw classifyPiBashResult(result);
       this.#attachReadMedia(name, result, context);
       this.#attachReadNote(name, result, context);
       this.#attachPreview(name, result, args, context);
-      return this.#normalizeResult(name, result, args);
+      return this.#normalizeResult(name, result, args, context);
     }
     return this.#invokeWithEvents(name, tool, args, context, runner, middleware, preflightEmitted);
   }
@@ -846,7 +849,7 @@ export class PiToolsProvider implements FabricProvider {
       isError,
     }));
 
-    if (isError) {
+    if (isError && !(context.nativeToolResult && tool.outputSchema && result.structuredContent !== undefined)) {
       if (isPiShellToolName(name)) {
         throw piBashResultError(thrown, textContent(result.content));
       }
@@ -854,7 +857,7 @@ export class PiToolsProvider implements FabricProvider {
       throw new Error(text || (thrown instanceof Error ? thrown.message : `Pi tool ${name} failed`));
     }
     this.#attachPreview(name, result, args, context);
-    return this.#normalizeResult(name, result, args);
+    return this.#normalizeResult(name, result, args, context);
   }
 
   // Schema-enforce and early-startup calls may have no ExtensionRunner, so the
@@ -862,9 +865,11 @@ export class PiToolsProvider implements FabricProvider {
   // provider boundary; replacement is idempotent when middleware already ran.
   #normalizeResult(
     name: PiCoreToolName,
-    result: { content: ToolContent; details?: unknown; isError?: boolean },
+    result: { content: ToolContent; details?: unknown; isError?: boolean; structuredContent?: unknown },
     args: Record<string, unknown>,
+    context: FabricInvocationContext,
   ): unknown {
+    if (context.nativeToolResult) return nativeToolResult(this.#definitionFor(name, args), result as PiToolResult);
     const normalized = normalizeResult(name, result);
     if (name !== "read" || typeof normalized !== "string") return normalized;
     return expandSkillDirMarkersForRead(normalized, args, this.#cwd);
@@ -956,7 +961,7 @@ export class PiToolsProvider implements FabricProvider {
     result: { content?: unknown },
     context: FabricInvocationContext,
   ): void {
-    if (name !== "read") return;
+    if (name !== "read" || context.nativeToolResult) return;
     const blocks = imageBlocks(result?.content);
     if (blocks.length > 0) context.attachMedia?.(blocks);
   }
@@ -973,7 +978,7 @@ export class PiToolsProvider implements FabricProvider {
     result: { content?: unknown },
     context: FabricInvocationContext,
   ): void {
-    if (name !== "read") return;
+    if (name !== "read" || context.nativeToolResult) return;
     const content = result?.content;
     if (!Array.isArray(content)) return;
     for (const block of content) {
@@ -1000,6 +1005,7 @@ export class PiToolsProvider implements FabricProvider {
       name,
       description: tool.description,
       inputSchema: closedPiInputSchema(name, inputSchema),
+      ...(tool.outputSchema ? {outputSchema: tool.outputSchema as Record<string, unknown>} : {}),
       risk: riskForTool(name),
       namespace: "builtin",
     };

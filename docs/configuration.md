@@ -32,6 +32,10 @@ Treat `node-process` and `bun-process` as an explicit escape hatch for trusted c
 
 Monty is always sandboxed, including under schema enforce, and does not require an installed CPython interpreter. Full CPython is an explicit trusted-native escape hatch with full local-user OS privileges outside schema enforce. Host approvals and audit cover bridge calls, not direct Python OS access. **Schema enforce preserves Python**; explicit CPython requires macOS `sandbox-exec` or Linux `bwrap` isolation; execution fails closed when isolation is unavailable, without falling back to unrestricted Python or TypeScript. `executor.memoryLimitBytes` uses `RLIMIT_AS` where the OS supports it, with a configuration ceiling of detected physical memory, not WASM32. This is an address-space limit, not a portable hard resident-memory cap. Process limits, timeouts, and cancellation are not a security sandbox; see [kernel isolation](kernels.md#isolation-and-resource-limits).
 
+### Native Pi codemode API
+
+`executor.codemodeProfile` is `"additive"` by default: existing Fabric APIs stay unchanged, while `nativeTools` and nonconflicting `tools.<name>` methods provide native Pi tool results. Set `"native"` for unmodified Pi JavaScript examples: `tools` and the discovery globals use native semantics, while `fabric.tools` retains Fabric discovery. Both profiles preserve `pi.*`, `mcp.*`, `extensions.*`, approvals and sPTC safety. The setting is TypeScript-kernel-only; Python ignores it. See [native codemode compatibility](codemode-parity.md) for collisions, result contracts, images and state interoperability. The UI setting is **Executor → Codemode API (TS)**.
+
 ### Executor timeouts and ceilings
 
 `executor.timeoutMs` (default `120000`) bounds a whole `fabric_exec` program. Two mechanisms can raise it:

@@ -85,6 +85,26 @@ describe("Pi-owned MCP tools inside Fabric", () => {
     expect(ambient.createRuntime).not.toHaveBeenCalled();
   });
 
+  it.each(["additive", "native"] as const)("%s aliases preserve native MCP error envelopes and hashed names", async profile => {
+    const f = fixture();
+    const original = f.executeTool.getMockImplementation()!;
+    f.executeTool.mockImplementation(async (...args) => {
+      const outcome = await original(...args);
+      return {...outcome, isError:true, result:{...outcome.result, structuredContent:{...outcome.result.structuredContent, isError:true, _meta:{source:"test"}}}};
+    });
+    const config = structuredClone(DEFAULT_FABRIC_CONFIG);
+    config.executor.codemodeProfile = profile;
+    config.approvals.network = "allow";
+    const execution = new FabricExecutionService(f.registry, config);
+    const result = await execution.execute({code:'return await tools.mcp__hashed_0({value:"x"});',parentToolCallId:"native-alias",signal:undefined,onPartial(){},context:{...f.context.extensionContext,cwd:process.cwd(),hasUI:false}});
+    expect(result.success,result.error??JSON.stringify(result.typeErrors)).toBe(true);
+    expect(result.value).toEqual({content:rawContent,structuredContent:{value:"answer"},isError:true,_meta:{source:"test"}});
+    expect(f.executeTool).toHaveBeenCalledOnce();
+    expect(f.direct).not.toHaveBeenCalled();
+    expect(ambient.createRuntime).not.toHaveBeenCalled();
+    await f.provider.close();
+  });
+
   it("preserves the declared execution name and description in the activity UI", async () => {
     const f = fixture();
     const activity = new FabricActivityStore();
