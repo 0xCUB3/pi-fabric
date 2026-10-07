@@ -1,10 +1,65 @@
-# Native Pi codemode parity
+# Native Pi codemode compatibility
 
-Fabric's TypeScript kernel exposes Pi-compatible non-chat models, small script state and output helpers in QuickJS and the trusted Node/Bun executors. The runtime stays lazy; it imports no native provider engine or credential resolver during registration.
+Fabric supports two script API profiles in the TypeScript kernel. Both run in the configured QuickJS or trusted Node/Bun executor, through the same registry, approvals, Schema authorizers, host scopes, capability views, middleware, audits and cancellation. Neither nests Pi's `codemode` tool or enables another top-level execution path.
+
+## Profiles
+
+`executor.codemodeProfile` defaults to `"additive"`. Set it to `"native"` in `~/.pi/agent/fabric.json` or a trusted project's `.pi/fabric.json`, or use `/fabric settings` → **Executor** → **Codemode API (TS)**:
+
+```json
+{ "executor": { "codemodeProfile": "native" } }
+```
+
+| Surface | Additive (default) | Native (opt-in) |
+| --- | --- | --- |
+| `tools.<name>(args)` | Existing Fabric discovery members win; other registered names call native tools | Native tool calls, including tools named `search`, `list`, `call`, or `models` |
+| `nativeTools.<name>(args)` | Unambiguous native tool view | Same native view as `tools` |
+| `fabric.tools` | Existing Fabric discovery/generic API | Existing Fabric discovery/generic API |
+| `pi.*`, `mcp.*`, `extensions.*` | Existing Fabric semantics | Existing Fabric semantics |
+| `searchTools`, `describeTool`, `describeNamespace`, `ALL_TOOLS` | Existing Fabric-qualified compatibility discovery | Native callable identifiers and native discovery shapes |
+| `nativeDiscovery` | Native discovery without changing existing globals | Same native discovery |
+| Source | Checked/repaired TypeScript | Unmodified JavaScript async function body, without TypeScript checking or repair |
+| `store` / `load` | Fabric's branch-local snapshot entries | Pi's branch-local `codemode-store` delta entries |
+
+Top-level `await` and `return` work in both profiles. The native profile is for unchanged Pi script examples. It does not change the `fabric_exec` JSON input format, outer result rendering, resource limits or security policy. Python ignores this setting; its kernel and API remain unchanged.
+
+### Tool names and results
+
+```ts
+// Works in both profiles:
+const result = await tools.bash({ command: "git status --short" });
+return result.output;
+```
+
+Native calls use Pi identifiers: `tools.read`, `tools.write`, `tools.mcp__server__tool`, and sanitized registered extension names. Real Pi registration names (including hashed MCP identifiers) are authoritative. `nativeDiscovery.ALL_TOOLS` enumerates the visible names. Sanitization collisions fail explicitly; they never select an arbitrary tool. Recursive `codemode` / `fabric_exec` calls are excluded.
+
+Native results are projected from the final middleware-filtered tool result:
+
+- A tool with an output schema returns its `structuredContent`, including schema-backed error results. Native `bash` returns `{output, truncated, full_output_path?, exit_code, wall_time_seconds}`; a nonzero process exit is a result, not an exception.
+- MCP returns its `CallToolResult`, retaining `content`, `structuredContent`, `isError` and metadata. Check `isError`; `Promise.allSettled` alone does not detect these tool errors.
+- Tools without structured output return text. Native image reads return Pi's image block; call `image(block)` to display it.
+- Blocked, invalid or unstructured failed calls reject. Content-only middleware redaction never restores the original structured payload.
+
+These are **not aliases of the normalized Fabric results**. `pi.bash` still rejects nonzero exits unless `settle:true`, `pi.edit/write` still return Fabric envelopes, `extensions.*` still returns its captured envelope, and `mcp.*` still normalizes results and throws on MCP errors. Native foreground shell calls do not auto-detach at `executor.shellHangMs`; explicit Fabric background operations retain their existing contract.
+
+### Discovery and collisions
+
+```ts
+// Safe under either profile, even with a native tool named "search":
+const native = await nativeDiscovery.searchTools("issues", { limit: 5 });
+const fabric = await globalThis.fabric.tools.search({ query: "issues" });
+return { native, fabric };
+```
+
+Native `searchTools` returns `{name,description}[]`, with callable identifiers and advisory declarations. `describeTool(name)` returns a declaration/description **string** or `undefined`. `describeNamespace(name)` returns `{name,description?,instructions?,tools:string[]}` or `undefined`. `ALL_TOOLS` uses those same native identifiers. Search uses BM25; declarations are bounded and dispatch schemas remain authoritative. Actual namespace instructions are exposed only for visible tools.
+
+The additive globals retain their existing shapes: Fabric-qualified refs, object-valued `describeTool`, and object-valued namespace tool entries. Use `nativeDiscovery` for native shapes in additive mode. In native mode use `fabric.tools.search/describe/list/call` for Fabric discovery. A single property cannot simultaneously be Fabric's `tools.search` and a registered tool named `search`.
+
+Fabric's catalog page remains bounded to 1000 actions. Host-registered callable tools beyond that page are resolved individually, so native registrations remain discoverable. For larger Fabric-owned provider catalogs, use provider-specific discovery and exact Fabric refs.
 
 ## Models
 
-`models === tools.models`. Calling `tools.models()` still returns Fabric's legacy authenticated chat catalog. Both aliases also expose:
+`models === fabric.tools.models` in both profiles; in additive mode `models === tools.models` too. Calling `fabric.tools.models()` returns Fabric's legacy authenticated chat catalog. The model namespace exposes:
 
 - `getModelsOfType(type, provider?)`
 - `getAvailableOfType(type, provider?)`
@@ -12,39 +67,31 @@ Fabric's TypeScript kernel exposes Pi-compatible non-chat models, small script s
 - `classify({provider, id}, {state, questions})`
 - `generateImages({provider, id}, {input})`
 
-Types are `chat`, `classifier`, and `image`. Chat execution is not exposed. Classifiers accept native `choice`, `score`, and `bool` questions; bool answers contain `probability`. Full catalog entries also work as selectors. Registry lookups resolve the authoritative model; guest-supplied configuration, headers and credentials are never used. Catalog metadata is allowlisted. Authentication and cancellation use the public host `ctx.modelRegistry` methods and their `{signal}` option.
+Types are `chat`, `classifier`, and `image`; chat execution is not exposed. Classifiers accept native `choice`, `score`, and `bool` questions; bool answers contain `probability`. Full catalog entries work as selectors. Registry lookups resolve the authoritative model; guest configuration, headers and credentials are never used. Authentication and cancellation use public host registry APIs. At most four classifier/image calls run concurrently per invocation, including mixed calls; waiting calls cancel with the script.
 
-Calls are ordinary registered `native.*` actions: schema validation, approval policies, Schema authorizers, committed capability views and host scopes apply. `native` is a reserved provider name. A pinned view must explicitly include the required native actions; no internal dispatch widens it. Native catalog/load actions have read risk, store has write risk, and model execution has network risk. Scoped hosts additionally need `native:models` read/execute grants or `native:store` read/write grants. At most four classifier/image calls run concurrently per invocation, including mixed calls. Waiting calls cancel with the script.
-
-Native result `stopReason` and `errorMessage` are retained. Their reported usage is normalized and included in the outer tool result, even on native provider errors. This does **not** change direct `jev.evaluate` accounting. Classifier strings are capped at 262144 characters, question/criteria/input collections at 1000, and serialized model requests/responses at 16777216 characters. Provider-specific limits may be lower. Missing native registry methods produce an explicit upgrade/compatibility error.
+These remain registered `native.*` actions. Scoped hosts require `native:models` read/execute or `native:store` read/write grants as appropriate; pinned views must include the required actions. Native `stopReason` and `errorMessage` are retained, and reported usage is included even on provider errors. Direct `jev.evaluate` accounting is unchanged. Classifier strings are capped at 262144 characters, question/criteria/input collections at 1000, and serialized model requests/responses at 16777216 characters. Provider limits may be lower. Missing registry APIs produce explicit compatibility errors.
 
 ## Branch-local script store
 
-`store(key, value)` and `load(key)` are synchronous JSON helpers; aliases work too. `store(key, undefined)` deletes. One serialized value is limited to **262144 characters**, and the sum of serialized values to **1048576**. Loads return detached values. This store is not mesh state.
+`store(key,value)` / `load(key)` are synchronous JSON helpers. `store(key,undefined)` deletes. Loads return detached values. One serialized value is limited to **262144 characters**, all values to **1048576**. This is not mesh state.
 
-A mounted execution initializes its snapshot through authorized `native.load` before user code. If that read is denied, ordinary scripts can still run, but store/load throw the captured denial. Successful scripts stage through authorized `native.store`, then append a `fabric-codemode-store` custom entry via `pi.appendEntry`. Failed, cancelled, timed-out, and type-error scripts do not commit. Snapshot reconstruction uses only `sessionManager.getBranch()`, so resume and navigation follow the selected branch. Malformed historical snapshots are ignored.
+Additive mode reads/writes `fabric-codemode-store` snapshots. Native mode explicitly opts into Pi's `codemode-store` `{set,delete}` entries on the selected branch. The two stores are not silently merged. Switching profiles switches which store is visible. Native scripts and native Pi codemode can exchange state through these delta entries.
 
-Commit checks the captured session ID, leaf ID and runtime generation. Any intervening leaf/session switch rejects the transaction, preventing writes to another branch. Concurrent writers from one snapshot therefore have a single winner; retry the stale writer explicitly. The guard is intentionally conservative: even unrelated leaf changes invalidate a write. Runtime teardown invalidates outstanding transactions. Standalone execution-service users must mount `nativeCodemode.setPersistence((type, data) => pi.appendEntry(type, data))`; unmounted synchronous state helpers fail explicitly.
+Initialization and staging pass through authorized `native.load` and `native.store`. Failed, aborted and timed-out scripts do not commit; additive type errors do not commit either. Malformed historical entries are ignored. Commit checks the captured session, leaf and runtime generation. Any intervening navigation or concurrent leaf change rejects the transaction; retry a stale writer explicitly. This conservative protection is stronger than bare Pi's store behavior. Standalone execution services must mount `nativeCodemode.setPersistence((type,data) => pi.appendEntry(type,data))` for state helpers.
 
-## Output and discovery helpers
+## Output and options
 
-- `text(value)` emits strings directly and other values as JSON.
-- `image(value)` accepts PNG/JPEG/GIF/WebP image blocks, local base64 data URLs, and `{image_url: string | {url}}`. It never fetches remote URLs. Returned local image forms also pass through the media sanitizer.
-- `exit()` ends successfully, retaining prior output and committing staged state. Like a thrown control signal it can be intercepted by a guest catch block.
+- `text(value)` emits strings directly, other values as JSON.
+- `image(value)` accepts PNG/JPEG/GIF/WebP blocks, local base64 data URLs and `{image_url:string|{url}}`. It never fetches remote URLs. Explicit images are emitted as multimodal content and saved to host-owned temporary files; output reports their paths. A remote execution environment does not necessarily share that filesystem.
+- `exit()` succeeds with prior output and staged state. As a thrown control signal it can be intercepted by a guest catch block.
 - `console.log/info/warn/error/debug` and `print` remain available.
 
-Explicit images are retained with partial text on errors and exit. Pending host calls are cancelled when a script ends; detached task ownership remains governed by Fabric's existing task contract. Output helpers enforce 100000 emissions and 16777216 characters of explicit text/image output in addition to Fabric's existing log and result limits.
+Partial output and explicit images survive errors and deadlines. Pending host calls cancel when the script ends; detached tasks retain their ownership contract. Explicit output is capped at 100000 emissions and 16777216 characters, in addition to Fabric output limits.
 
-`searchTools(query, {limit?, namespace?})`, `describeTool(name)`, `describeNamespace(name)` and `ALL_TOOLS` offer compatibility discovery. Names are **Fabric-qualified action refs**, usable with `tools.call({ref:name,args})`, not new `tools.<name>` methods. Search uses Fabric's lexical ranking (default limit 8), not a promise of native BM25-identical ordering. The snapshot uses Fabric's bounded discovery page (at most 1000 actions); use existing provider-specific catalog/list/search for larger installations. `ALL_TOOLS` is populated in mounted executions. Descriptions include bounded advisory TypeScript declarations; authoritative schemas remain enforced at dispatch. Namespace `instructions` comes only from actual Pi `namespace.instructions` on a visible tool, never inferred from `description`. Hidden/scoped-out actions cannot reveal namespace guidance.
+`maxOutputTokens` / `max_output_tokens` estimate four characters per token and are capped by `executor.maxOutputChars`. `timeout_ms` is a hard positive-integer deadline capped by `executor.maxTimeoutMs`; it can lower the configured deadline and cannot be extended or paused. `timeoutMs` retains its raises-only behavior. The hard deadline wins when both are supplied. A leading `// @options: {"max_output_tokens":2000,"timeout_ms":60000}` works; unsupported, invalid or conflicting options fail explicitly.
 
-## Per-call options
+## sPTC
 
-Tool arguments accept `maxOutputTokens` and its alias `max_output_tokens`; output is estimated at four characters per token and capped by configured `executor.maxOutputChars`. Truncated output retains Fabric's full-output artifact behavior. Conflicting aliases are rejected.
+Both profiles support speculative PTC on eligible isolated runtimes. Literal `tools.read(...)` and `nativeTools.read(...)` map to the same canonical `pi.read` authorization identity, but the native result projection is part of the speculative binding token. A native result can never answer a Fabric-view call or vice versa. Known Pi MCP aliases resolve through registration metadata, not guessed name splitting; unresolved aliases conservatively skip warming and execute normally.
 
-`timeout_ms` is a positive-integer hard script deadline, capped by `executor.maxTimeoutMs`. It can lower the configured deadline and cannot be extended by nested calls or paused for human waits. Existing `timeoutMs` retains raises-only behavior. If both are supplied, the hard deadline wins.
-
-TypeScript source may begin with `// @options: {"max_output_tokens": 2000, "timeout_ms": 60000}`. Unsupported keys, nonpositive/noninteger values and conflicting explicit arguments fail explicitly.
-
-## Deliberate boundaries
-
-Shell return values/behavior and direct Jev accounting are unchanged. Python's existing kernel and generic `tools.call` surface remain intact; synchronous helpers and native namespace aliases above are TypeScript additions, not new Python syntax. Native store entries are separate from Pi's own `codemode-store` entries, avoiding incompatible cross-extension writes. Fabric's existing memory, nested-call, approval and capability policies remain authoritative.
+Native reads retain all existing live approval/Schema gates, descriptor checks, mutation epochs, file freshness, cancellation, take-once consumption and side-channel replay. Alias use or mutation taints a native facade for the stream. Changing profiles through configuration resets stream/cache state. Node/Bun remain non-speculative, and Python speculation is unchanged. See [speculation](speculation.md).

@@ -19,6 +19,8 @@ export interface FabricSandboxResult {
 export interface FabricSandboxOptions {
   timeoutMs: number;
   nativeStoreEnabled?: boolean;
+  nativeToolsEnabled?: boolean;
+  codemodeProfile?: "additive" | "native";
   memoryLimitBytes: number;
   /** Optional uninterrupted guest CPU limit. Await host work/timers to yield. */
   maxCpuSliceMs?: number;

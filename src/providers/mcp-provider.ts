@@ -98,7 +98,8 @@ const normalizeSchema = (schema: unknown): Record<string, unknown> =>
     ? (schema as Record<string, unknown>)
     : emptyObjectSchema;
 
-export const normalizeMcpResult = (result: unknown): unknown => {
+export const normalizeMcpResult = (result: unknown, native = false): unknown => {
+  if (native) return result;
   if (typeof result !== "object" || result === null || Array.isArray(result)) return result;
   const record = result as Record<string, unknown>;
   if (!Array.isArray(record.content)) return result;
@@ -432,13 +433,13 @@ export class McpProvider implements FabricProvider {
           : {};
       const nativeServer = this.#native ? await this.#nativeServer(server) : undefined;
       if (nativeServer) return this.#native!.invoke(nativeServer, tool, toolArgs, context);
-      return this.#call(server, tool, toolArgs, context.signal);
+      return this.#call(server, tool, toolArgs, context.signal, context.nativeToolResult);
     }
     const parsed = this.#parseToolName(actionName);
     if (!parsed) throw new Error(`Invalid MCP action: ${actionName}`);
     const nativeServer = this.#native ? await this.#nativeServer(parsed.server) : undefined;
     if (nativeServer) return this.#native!.invoke(nativeServer, parsed.tool, args, context);
-    return this.#call(parsed.server, parsed.tool, args, context.signal);
+    return this.#call(parsed.server, parsed.tool, args, context.signal, context.nativeToolResult);
   }
 
   async close(): Promise<void> {
@@ -497,8 +498,9 @@ export class McpProvider implements FabricProvider {
     toolName: string,
     args: Record<string, unknown>,
     signal?: AbortSignal,
+    native = false,
   ): Promise<unknown> {
-    if (!this.#cacheOn) return this.#callLegacy(serverName, toolName, args, signal);
+    if (!this.#cacheOn) return this.#callLegacy(serverName, toolName, args, signal, native);
     if (signal?.aborted) throw new Error("MCP call cancelled");
     await this.#hydrate();
     const server = await this.#resolveKnownServer(serverName);
@@ -521,7 +523,7 @@ export class McpProvider implements FabricProvider {
     });
     try {
       const result = await this.#withAbort(operation, signal, () => runtime.close(server));
-      return normalizeMcpResult(result);
+      return normalizeMcpResult(result, native);
     } catch (error) {
       // A failed call is fresh evidence the cached metadata may be wrong.
       const existing = this.#servers.get(server);
@@ -1016,6 +1018,7 @@ export class McpProvider implements FabricProvider {
     toolName: string,
     args: Record<string, unknown>,
     signal?: AbortSignal,
+    native = false,
   ): Promise<unknown> {
     if (signal?.aborted) throw new Error("MCP call cancelled");
     const runtime = await this.#getToolRuntime();
@@ -1032,7 +1035,7 @@ export class McpProvider implements FabricProvider {
     });
     try {
       const result = await this.#withAbort(operation, signal, () => runtime.close?.(server));
-      return normalizeMcpResult(result);
+      return normalizeMcpResult(result, native);
     } catch (error) {
       this.#toolMetadata.delete(server);
       throw error;

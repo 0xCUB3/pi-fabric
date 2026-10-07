@@ -70,7 +70,6 @@ export const parseWorkerOptions = (
   const imagesFile = optional(args, "images-file");
   const systemPrompt = optional(args, "system-prompt");
   const sessionFile = optional(args, "session-file");
-  const piPackageDir = optional(args, "pi-package-dir");
   const persistSessionSource = optional(args, "persist-session");
   if (persistSessionSource !== undefined && persistSessionSource !== "true" && persistSessionSource !== "false") {
     throw new Error("Invalid worker persist-session flag");
@@ -180,7 +179,6 @@ export const parseWorkerOptions = (
     ...(schemaFile ? { schemaFile } : {}),
     cwd: required(args, "cwd"),
     piBinary: required(args, "pi-binary"),
-    ...(piPackageDir ? { piPackageDir } : {}),
     claudeBinary: required(args, "claude-binary"),
     vedaBinary: required(args, "veda-binary"),
     vedaBackend: required(args, "veda-backend"),

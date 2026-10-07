@@ -102,6 +102,15 @@ describe("exclusive kernel tool surface", () => {
     expect(defaultFabricExecutionGuidance(true, "python")).not.toContain("models === tools.models");
   });
 
+  it("describes the native profile without shadowing Fabric discovery", () => {
+    const guidance = defaultFabricExecutionGuidance(true, "typescript", "monty", "native");
+    expect(guidance).toContain("Native Pi codemode profile");
+    expect(guidance).toContain("fabric.tools.call");
+    expect(guidance).toContain("models === fabric.tools.models");
+    expect(fabricExecutionKernelGuidance(true, "typescript", "monty", "native")).toContain("Write JavaScript");
+    expect(defaultFabricExecutionGuidance(true, "python", "monty", "native")).not.toContain("Native Pi codemode profile");
+  });
+
   it("uses Python syntax in turn-stable guidance", () => {
     const guidance = defaultFabricExecutionGuidance(true, "python");
     expect(guidance).toContain('r["output"]');

@@ -8,11 +8,13 @@ const SHELL_COMPOSITION_GUIDANCE =
   " tasks.read (byte offset/next, waitMs long-poll) and tasks.watch with {id, match} read or filter any background task without a monitor." +
   (process.platform === "win32" ? "" : " With jev-fabric (see tasks/sessions via tools.describe): pi.bash durable:true outlives Pi and reattaches on resume; sessions.open/write/read/stop drive interactive children (a Jev program's end with it).");
 
-export const fabricExecutionKernelGuidance = (fullCodeMode: boolean, kernel: FabricKernel = "typescript", pythonRuntime: "cpython" | "monty" = "monty"): string =>
+export const fabricExecutionKernelGuidance = (fullCodeMode: boolean, kernel: FabricKernel = "typescript", pythonRuntime: "cpython" | "monty" = "monty", profile: "additive" | "native" = "additive"): string =>
   [
     kernel === "python"
       ? `Configured fabric_exec kernel: Python (${pythonRuntime === "monty" ? "Monty sandboxed subset" : "CPython"}). Write Python only in \`code\`: top-level await/return, dicts, True/False/None, and asyncio.gather. There is no per-call language switch.`
-      : "Configured fabric_exec kernel: TypeScript. Write TypeScript only in `code`; top-level await and return are supported.",
+      : profile === "native"
+        ? "Configured fabric_exec kernel: TypeScript with native Pi codemode API. Write JavaScript async function bodies; top-level await and return work. Native source is not type-checked or repaired."
+        : "Configured fabric_exec kernel: TypeScript. Write TypeScript only in `code`; top-level await and return are supported.",
     "The configured kernel is exclusive for Fabric orchestration, including when skills or earlier messages show another language. Do not invoke another interpreter through shell tools or native subprocesses merely to run Fabric orchestration in a different language. Project builds, tests, and explicitly requested interpreter work remain legitimate shell commands.",
     fullCodeMode
       ? "Pi Fabric full code mode: `fabric_exec` is the only way to call Pi core tools — use them as `pi.*` inside `code`."
@@ -23,8 +25,10 @@ export const fabricExecutionKernelGuidance = (fullCodeMode: boolean, kernel: Fab
     `Read every file the user provides (images, screenshots, code, text) with the ${fullCodeMode ? "`pi.read`" : "`read`"} tool before responding — never assume its contents.`,
   ].join(" ");
 
-export const defaultFabricExecutionGuidance = (fullCodeMode: boolean, kernel: FabricKernel = "typescript", pythonRuntime: "cpython" | "monty" = "monty"): string =>
-  kernel === "python"
+export const defaultFabricExecutionGuidance = (fullCodeMode: boolean, kernel: FabricKernel = "typescript", pythonRuntime: "cpython" | "monty" = "monty", profile: "additive" | "native" = "additive"): string =>
+  kernel === "typescript" && profile === "native"
+    ? "Native Pi codemode profile: tools.<name>(args) and nativeTools.<name>(args) use native results, including schema-backed error envelopes. searchTools/ALL_TOOLS return callable identifiers; describeTool returns a declaration string. image() emits images and saves host-side temporary artifacts. store/load share Pi codemode-store entries on this branch. Fabric discovery remains fabric.tools; pi.*, mcp.* and extensions.* keep Fabric result semantics. Policies and limits are unchanged. " + defaultFabricExecutionGuidance(fullCodeMode, kernel, pythonRuntime).replaceAll("tools.", "fabric.tools.").replaceAll("`tools`", "`fabric.tools`")
+    : kernel === "python"
     ? (pythonRuntime === "monty"
       ? "Python backend: Monty sandboxed subset, not CPython. Native filesystem/network/environment access and arbitrary imports are unavailable; use host tools for effects. Supply acyclic JSON host arguments; recursive containers are unsupported. Underscore-prefixed direct capability attributes are unavailable: use tools.call with the exact discovered ref instead. π is an attribute object; payloads is a dict, not the same identity. "
       : "Python backend: CPython; native standard-library imports are available. ") + "Python fabric_exec: write an async function body with `await` and `return`; each invocation starts fresh. Use imports supported by the configured backend, such as `import asyncio`. Host methods accept one dict or keyword arguments: `await tools.search(query=\"example\")`, `await tools.call(ref=\"provider.action\", args={\"key\": \"value\"})`; discover with tools.search instead of enumerating: tools.list is a capped page (default 100, hard cap 1000) with no truncation marker, so a short result never proves an action is absent (tools.list(envelope=True) reports totals). Known actions use mcp.<server>.<tool>, memory.*, state.*, schema.*, compact.*, components.*, agents.*, or mesh.*. Responses are native Python dicts/lists, not attribute objects. Use `asyncio.gather` for independent calls. `π.key` and `payloads[\"key\"]` contain only the exact top-level payload keys. Return JSON-compatible data (convert sets, bytes, paths, and datetimes explicitly); print output is bounded. JavaScript callback helpers (workflow, memory.walk, and predicate callbacks) are not Python APIs; page with ordinary await/loops instead. Provider argument validation and approvals remain host-enforced. Schema enforce retains host gates and requires the selected runtime’s isolation; no unrestricted fallback." + (fullCodeMode ? " `await pi.read(\"/x\")`, `await pi.grep(pattern=\"TODO\", path=\"src\")`, `await pi.find(pattern=\"*.py\", path=\"src\")`, and `await pi.ls(\"src\")` return strings. `await pi.bash(command=\"ls\")`, `await pi.edit(path=\"/x\", oldText=\"a\", newText=\"b\")`, and `await pi.write(path=\"/y\", content=π.body)` return dicts; read `r[\"output\"]`. Shell nonzero exits raise; `settle=True` returns a failure dict instead. Cancellation, timeout, approval and security errors still raise. A nested shell that exceeds executor.shellHangMs still resolves ok with a still-running notice, pid, and live output path; background=True detaches immediately. Detached results include details.taskId; completion notifies this session. Use tools.call(ref='tasks.list', args={}), tasks.get or tasks.stop with {'id': taskId}; pi.read can read the bounded log. Bounded controllers can await tasks.wait or tasks.watch (monitor batches, after cursor) without polling; timeout/cancellation affects only the observation. Opt-in monitor={'delivery':'wake','match':'literal','timeoutMs':300000,'intervalMs':5000} (choose delivery 'ui' or 'wake') also detaches: UI-only never wakes the agent, wake sends coalesced line events. Monitors expire and are not automatically renewed." + SHELL_COMPOSITION_GUIDANCE + " Captured tools are `await extensions.<name>(...)`." : " Pi core and extensions are unavailable inside fabric_exec in orchestration-only mode.")
@@ -76,6 +80,7 @@ const packageNameFromManifest = (startPath: string | undefined): string | undefi
 export const extensionToolRosterGuidance = (
   tools: ReadonlyArray<ExtensionRosterToolSource>,
   coreToolNames: ReadonlySet<string>,
+  nativeProfile = false,
 ): string | undefined => {
   const extensionTools = tools.filter((tool) => !coreToolNames.has(tool.name));
   if (extensionTools.length === 0) return undefined;
@@ -101,7 +106,7 @@ export const extensionToolRosterGuidance = (
     else groups.set(label, [tool.name]);
   }
   return [
-    "Registered extension tools are callable inside fabric_exec as `extensions.<name>(args)`; run `tools.list` for full descriptions and schemas before re-implementing an effect with pi.bash.",
+    `Registered extension tools are callable inside fabric_exec as \`extensions.<name>(args)\`; run \`${nativeProfile ? "fabric.tools" : "tools"}.list\` for full descriptions and schemas before re-implementing an effect with pi.bash.`,
     ...[...groups.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([label, names]) => "- " + label + ": " + names.join(", ")),

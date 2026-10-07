@@ -6,6 +6,16 @@ Harness. Pinned worker dependencies ship with Fabric; registration and idle hook
 do not load the worker or engines.
 No manual setup is required. Main's outer Pi session is unchanged.
 
+The subprocess owns a pinned SDK installed as `pi-fabric-worker-sdk` (an npm
+alias), because Pi-managed installs deliberately omit host-provided peers.
+Only the durable worker maps Pi imports to that SDK and its dependencies; the
+extension continues to use Main's host modules. If a partial/older installation
+reports a missing worker SDK, reinstall or update Fabric to restore its runtime
+dependencies. Installing Pi peers manually is not required. When Bun launches
+the parent worker, the durable SDK host runs through `node` on PATH and requires
+Node.js 24+, matching Fabric's declared engine. This keeps module resolution
+isolated without passing `NODE_PATH` to tools or borrowing Main's SDK.
+
 Set `agents.runner: "pi"` (or `runner: "pi"` per request) for the previous Pi CLI
 worker. Existing explicit configurations and stored actor runners are not
 rewritten. Pi JSONL remains the history interchange format. Custom Pi CLI wrappers

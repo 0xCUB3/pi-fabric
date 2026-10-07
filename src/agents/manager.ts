@@ -45,7 +45,6 @@ import {
   type HostedRunHooks,
 } from "./hosted-run.js";
 import { resolvePiBinary } from "./pi-binary.js";
-import { hostPackageRoots } from "../host-package.js";
 import {
   inheritedSessionPinsFromEnv,
   serializeInheritedSessionPins,
@@ -1046,7 +1045,6 @@ export class AgentManager {
         agentCwd,
         "--pi-binary",
         this.#piBinary,
-        ...(runner === "pi-durable" ? hostPackageRoots().slice(0, 1).flatMap(root => ["--pi-package-dir", root]) : []),
         "--claude-binary",
         this.#claudeBinary,
         "--veda-binary",

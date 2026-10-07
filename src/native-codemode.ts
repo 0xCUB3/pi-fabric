@@ -65,10 +65,23 @@ export class NativeCodemodeProvider implements FabricProvider {
   get persistenceAvailable(): boolean { return Boolean(this.#append); }
   setPersistence(append: ((type: string, data: unknown) => void) | undefined): void { this.#append = append; }
   invalidate(): void { this.#generation++; this.transactions.clear(); }
-  begin(id: string, context: ExtensionContext): { finish: (success: boolean) => Usage[] } {
+  begin(id: string, context: ExtensionContext, nativeStore = false): { finish: (success: boolean) => Usage[] } {
     const manager = context.sessionManager;
     let values: Record<string, unknown> = Object.create(null);
-    for (const entry of [...(manager?.getBranch?.() ?? [])].reverse()) {
+    const branch = [...(manager?.getBranch?.() ?? [])];
+    for (const entry of nativeStore ? branch : branch.reverse()) {
+      if (nativeStore) {
+        if (entry.type !== "custom" || entry.customType !== "codemode-store" || !entry.data || typeof entry.data !== "object") continue;
+        const delta = entry.data as {set?: Record<string, unknown>; delete?: unknown};
+        if (!delta.set || typeof delta.set !== "object" || Array.isArray(delta.set) || !Array.isArray(delta.delete) || !delta.delete.every(key => typeof key === "string")) continue;
+        try {
+          const next = Object.assign(Object.create(null), values);
+          for (const key of delta.delete) delete next[key];
+          Object.assign(next, delta.set);
+          values = validateScriptStore(next);
+        } catch { /* ignore malformed historical deltas */ }
+        continue;
+      }
       if (entry.type === "custom" && entry.customType === CODEMODE_STORE_ENTRY && entry.data && typeof entry.data === "object") {
         // A malformed old/custom entry must not poison unrelated scripts.
         try { values = validateScriptStore((entry.data as { values: Record<string, unknown> }).values); break; } catch { /* ignore invalid snapshots */ }
@@ -82,7 +95,11 @@ export class NativeCodemodeProvider implements FabricProvider {
       if (success && tx.staged) {
         if (context.signal?.aborted || generation !== this.#generation || manager.getSessionId() !== tx.session || manager.getLeafId() !== tx.leaf) throw new Error("Script store transaction is stale: session or branch changed");
         if (!this.#append) throw new Error("Script store persistence is unavailable");
-        this.#append(CODEMODE_STORE_ENTRY, { values: tx.staged });
+        if (nativeStore) {
+          const set = Object.fromEntries(Object.entries(tx.staged).filter(([key, value]) => JSON.stringify(tx.values[key]) !== JSON.stringify(value)));
+          const deleted = Object.keys(tx.values).filter(key => !Object.hasOwn(tx.staged!, key));
+          if (Object.keys(set).length || deleted.length) this.#append("codemode-store", {set, delete: deleted});
+        } else this.#append(CODEMODE_STORE_ENTRY, { values: tx.staged });
       }
       return tx.usage;
     } };

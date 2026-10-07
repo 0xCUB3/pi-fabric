@@ -297,8 +297,8 @@ const renderExtensionsDeclaration = (
 // for guestTypeDeclarations(). Missing or empty sections return undefined so
 // the loose static lines survive, matching cold-cache behavior.
 /** Bounded advisory declaration for native describeTool compatibility. */
-export const describeFabricActionDeclaration = (name: string, inputSchema: Record<string, unknown>): string =>
-  `${JSON.stringify(name)}: (args: ${schemaType(inputSchema, 0)}) => Promise<unknown>`;
+export const describeFabricActionDeclaration = (name: string, inputSchema: Record<string, unknown>, outputSchema?: Record<string, unknown>): string =>
+  `${JSON.stringify(name)}: (args: ${schemaType(inputSchema, 0)}) => Promise<${outputSchema ? schemaType(outputSchema, 0) : "unknown"}>`;
 
 export const buildDynamicGuestDeclarations = (
   sources: FabricGuestTypeSources,

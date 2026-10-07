@@ -90,6 +90,10 @@ export const buildExecutorSection = (
             : "TypeScript only; ignored by Python. QuickJS is isolated and limited by WASM32. Node/Bun processes support larger heaps but are an unsafe trusted-code escape hatch, not a security sandbox.",
           values: enforceTypeScript ? ["quickjs"] : EXECUTOR_RUNTIMES,
         }),
+        setting("executor.codemodeProfile", "Codemode API (TS)", config.executor.codemodeProfile, {
+          description: "Additive preserves Fabric's tools API and adds nativeTools plus nonconflicting tools aliases. Native gives tools and discovery helpers Pi semantics; Fabric discovery stays at fabric.tools. Policies and limits still apply. Ignored by Python.",
+          values: ["additive", "native"],
+        }),
         setting("executor.timeoutMs", "Timeout", formatMs(config.executor.timeoutMs), {
           description: `Default wall-clock time for a single fabric_exec program. A per-invocation timeoutMs or a matching executor.hostCallTimeouts ref can raise it up to the ${formatMs(config.executor.maxTimeoutMs)} policy maximum.`,
           submenu: numericSubmenu(

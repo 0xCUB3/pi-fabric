@@ -1,5 +1,6 @@
 import { NativeCodemodeProvider } from "./native-codemode.js";
 import { nativeMcpIdentity } from "./core/native-mcp-identity.js";
+import { nativeToolRef, nativeToolIdentifier } from "./core/native-tool-names.js";
 import type { Usage } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
@@ -265,6 +266,7 @@ export class FabricExecutionService {
 
   async execute(options: FabricExecutionOptions): Promise<FabricExecutionResult> {
     const executor = this.config.executor;
+    const codemodeProfile = executor.codemodeProfile;
     if (
       process.env.PI_FABRIC_WRITE_POLICY &&
       (executor.kernel === "python"
@@ -353,6 +355,8 @@ export class FabricExecutionService {
         [...unavailable.keys()],
         guestTypeSources,
         coreOverrides,
+        false,
+        codemodeProfile,
       ));
     }
     if (checked.errors.length > 0) {
@@ -537,14 +541,17 @@ export class FabricExecutionService {
         : this.config.executor.timeoutMs,
       Math.min(requestedTimeoutMs, this.config.executor.maxTimeoutMs),
     );
+    const nativeCallRefs = new Map<string, string | undefined>();
+    const hostCallRef = (ref: string, args: Record<string, unknown>): string =>
+      ref === "fabric.$call" && typeof args.ref === "string" ? args.ref
+        : ref === "fabric.$nativeTool" && typeof args.name === "string" ? nativeCallRefs.get(args.name) ?? ref : ref;
     const minimumTimeoutMsForHostCall = (
       ref: string,
       args: Record<string, unknown>,
     ): number | undefined => {
-      const targetRef =
-        ref === "fabric.$call" && typeof args.ref === "string" ? args.ref : ref;
+      const targetRef = hostCallRef(ref, args);
       const targetArgs =
-        ref === "fabric.$call" &&
+        (ref === "fabric.$call" || ref === "fabric.$nativeTool") &&
         typeof args.args === "object" &&
         args.args !== null &&
         !Array.isArray(args.args)
@@ -590,7 +597,7 @@ export class FabricExecutionService {
     };
     const humanWaitRefs = new Set(this.config.executor.humanWaitRefs);
     const isHumanWaitHostCall = (ref: string, args: Record<string, unknown>): boolean =>
-      humanWaitRefs.has(ref === "fabric.$call" && typeof args.ref === "string" ? args.ref : ref);
+      humanWaitRefs.has(hostCallRef(ref, args));
     const traceAttempt = async <T>(
       ref: string,
       args: Record<string, unknown>,
@@ -613,7 +620,7 @@ export class FabricExecutionService {
     const invokeAction = async (
       ref: string,
       args: Record<string, unknown>,
-      callContext: typeof baseContext & { signal: AbortSignal },
+      callContext: typeof baseContext & { signal: AbortSignal; nativeToolResult?: boolean },
     ): Promise<unknown> => {
       const traceOperation = traceRecorder.issueCall(ref, args);
       try {
@@ -669,18 +676,49 @@ export class FabricExecutionService {
         },
         audits,
         // Native images/state must stay intact; final output has its own bounds.
-        maxResultChars: ref.startsWith("native.") ? 16_777_216 : this.config.executor.maxNestedResultChars,
+        maxResultChars: ref.startsWith("native.") || callContext.nativeToolResult ? 16_777_216 : this.config.executor.maxNestedResultChars,
         traceOperation,
         observeInvocation,
       });
     };
-    const nativeTransaction = this.nativeCodemode.begin(options.parentToolCallId, options.context);
+    const nativeTransaction = this.nativeCodemode.begin(options.parentToolCallId, options.context, !python && codemodeProfile === "native");
+    const loadNativeCatalog = async (context: typeof baseContext) => {
+      const api = await import("./native-tool-catalog.js");
+      const definitions = ((options.context as Partial<import("@earendil-works/pi-coding-agent").ExtensionToolContext>).tools
+        ?? this.capturedTools?.registeredTools().map(entry => entry.definition)
+        ?? []) as import("@earendil-works/pi-coding-agent").ToolDefinition[];
+      // A native host already supplies its callable catalog. Do not initialize
+      // an independent MCP transport just to alias those registered tools.
+      // Only Pi-native providers contribute aliases. An unrelated provider's
+      // discovery failure or pending connection must not block every program.
+      const providers = definitions.length ? ["pi", "extensions"] : ["pi", "extensions", "mcp"];
+      const actions = (await Promise.all(providers.filter(provider => this.registry.has(provider))
+        .map(provider => this.registry.list({provider, limit: 1_000}, context)))).flat();
+      const refs = new Set(actions.map(action => action.ref));
+      // Host registrations beyond the Fabric discovery page remain reachable.
+      for (const definition of definitions) {
+        const ref = nativeToolRef(definition, nativeMcpIdentity);
+        if (refs.has(ref)) continue;
+        refs.add(ref);
+        try { actions.push(await this.registry.describe(ref, context)); } catch { /* hidden or unavailable */ }
+      }
+      const entries = api.nativeToolCatalog(actions.filter(action => effectiveFullCodeMode || !fullCodeProvider(action.provider)), definitions, nativeMcpIdentity);
+      nativeCallRefs.clear();
+      for (const entry of entries) nativeCallRefs.set(entry.name, nativeCallRefs.has(entry.name) ? undefined : entry.ref);
+      return {api, entries};
+    };
+    // Like Pi, bind callable identifiers once per invocation. Actual dispatch
+    // still rechecks live authority; a removed alias never retargets another tool.
+    let nativeCatalogSnapshot: ReturnType<typeof loadNativeCatalog> | undefined;
+    const nativeCatalog = (context: typeof baseContext) => nativeCatalogSnapshot ??= loadNativeCatalog(context);
     let nativeFinished = false;
     let sandboxResult: FabricSandboxResult;
     let hostCall: FabricHostCall | undefined;
     const sandboxBase = {
       cwd: options.context.cwd,
       nativeStoreEnabled: this.nativeCodemode.persistenceAvailable,
+      nativeToolsEnabled: !python,
+      codemodeProfile,
       memoryLimitBytes: this.config.executor.memoryLimitBytes,
       maxLogChars: this.config.executor.maxOutputChars,
       ...(options.hardTimeoutMs === undefined ? { minimumTimeoutMsForHostCall } : {}),
@@ -728,6 +766,8 @@ export class FabricExecutionService {
             [...unavailable.keys()],
             guestTypeSources,
             coreOverrides,
+            false,
+            codemodeProfile,
           );
           if (!cached) preparedPrograms.set(source, next);
           ({ code: source, checked: prepared } = next);
@@ -785,6 +825,29 @@ export class FabricExecutionService {
         hostCall = async (ref, args, runtimeSignal) => {
           const callContext = { ...baseContext, signal: runtimeSignal };
           switch (ref) {
+            case "fabric.$nativeTool": {
+              if (!args.args || typeof args.args !== "object" || Array.isArray(args.args)) throw new Error("Native tools take one argument object");
+              const {api, entries} = await nativeCatalog(callContext);
+              const tool = api.resolveNativeTool(entries, args.name);
+              return invokeAction(tool.ref, args.args as Record<string, unknown>, {...callContext, nativeToolResult: true});
+            }
+            case "fabric.$piAllTools":
+            case "fabric.$piSearch":
+            case "fabric.$piDescribe":
+            case "fabric.$piNamespace": {
+              const {api, entries} = await nativeCatalog(callContext);
+              const info = (entry: typeof entries[number]) => ({name: entry.name, description: entry.description});
+              if (ref === "fabric.$piAllTools") return entries.map(info);
+              if (ref === "fabric.$piSearch") return api.searchNativeTools(entries, args.query, args.limit, args.namespace).map(info);
+              if (typeof args.name !== "string") throw new Error("Native discovery expects a name string");
+              if (ref === "fabric.$piDescribe") {
+                const matches = entries.filter(entry => entry.name === args.name || entry.rawName === args.name);
+                return matches.length === 1 ? matches[0]!.description : undefined;
+              }
+              const matches = entries.filter(entry => entry.namespace && (entry.namespace.name === args.name || nativeToolIdentifier(entry.namespace.name) === args.name));
+              if (!matches.length) return undefined;
+              return {...matches[0]!.namespace, tools: matches.map(entry => entry.name)};
+            }
             case "fabric.$allTools":
             case "fabric.$nativeSearch":
             case "fabric.$nativeDescribe":
@@ -1194,11 +1257,15 @@ export class FabricExecutionService {
     // persisted traces. Raw media must not: images are hoisted out of band and
     // base64 payloads collapse to a descriptor (see core/media-sanitize.ts).
     const sanitizedValue = sanitizeFabricMediaValue({ value: sandboxResult.value, emitted: sandboxResult.emitted ?? [] });
+    const imageArtifacts = !python && (sandboxResult.emitted?.length ?? 0) > 0
+      ? await import("./native-image-artifacts.js").then(module => module.persistNativeImages(sanitizeFabricMediaValue(sandboxResult.emitted).images))
+        .catch(error => [`Image artifact unavailable: ${String(error)}`])
+      : [];
     return {
       success: succeeded,
       kernel: python ? "python" : "typescript",
       value: (sanitizedValue.value as { value: unknown }).value,
-      logs: [...sandboxResult.logs, ...nestedLogs].map(sanitizeFabricMediaText),
+      logs: [...sandboxResult.logs, ...nestedLogs, ...imageArtifacts].map(sanitizeFabricMediaText),
       ...(sanitizedValue.images.length > 0 ? { media: sanitizedValue.images } : {}),
       audits,
       phases,

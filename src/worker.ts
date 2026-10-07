@@ -5,7 +5,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { assertWorkerRuntime, writeWorkerStartupFailure } from "./worker/startup.js";
-import { hostPeerNodePath } from "./host-package.js";
 
 import { StringDecoder } from "node:string_decoder";
 import type { ImageContent } from "@earendil-works/pi-ai";
@@ -335,10 +334,7 @@ const main = async (): Promise<void> => {
       "--durable-run-id", options.id,
       "--durable-directory", path.join(path.dirname(options.statusFile), "durable"),
     );
-    if (options.piPackageDir) piArguments.push("--pi-package-dir", options.piPackageDir);
   }
-  // Bun reads NODE_PATH only at startup; Node workers install a resolve hook instead.
-  const hostPeerPackage = options.runner === "pi-durable" && process.versions.bun ? options.piPackageDir : undefined;
   const claudeCli = options.runner === "claude" ? await loadClaudeCli() : undefined;
   const vedaCli = options.runner === "veda" ? await loadVedaCli() : undefined;
   const childArguments =
@@ -384,7 +380,6 @@ const main = async (): Promise<void> => {
     detached: process.platform !== "win32",
     env: {
       ...process.env,
-      ...(hostPeerPackage ? { NODE_PATH: hostPeerNodePath(hostPeerPackage, process.env.NODE_PATH) } : {}),
       ...(options.inheritedSessionPins && options.inheritedSessionPins.length > 0
         ? {
             PI_MULTIPROVIDER_SESSION_PINS: JSON.stringify(options.inheritedSessionPins),

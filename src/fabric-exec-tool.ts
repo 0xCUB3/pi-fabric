@@ -167,7 +167,7 @@ export const createFabricExecTool = (
       ? monty
         ? "Execute Python through Fabric's configured Monty sandbox. Monty runs a Python subset with VM resource limits, no native filesystem/network/environment access, and only host-mediated tools. Each invocation starts fresh. This is the exclusive model tool path in full code mode and Schema enforce mode."
         : "Execute Python through Fabric’s configured CPython kernel for Pi core tools, MCP, providers, discovery, and extensions. Each call uses a fresh process. Native execution is trusted code; Schema enforce requires OS isolation. This is the exclusive model tool path in full code mode and Schema enforce mode."
-      : "Execute type-checked TypeScript through Fabric's configured executor for Pi core tools, MCP, Fabric providers, discovery, and extensions. QuickJS is isolated by default; the optional Node/Bun process is an unsafe trusted-code escape hatch. In full code mode, and always in Schema enforce mode, this is the exclusive model tool path.",
+      : "Execute code through Fabric's TypeScript kernel: type-checked TypeScript by default, unmodified JavaScript with executor.codemodeProfile native. Both support nativeTools; native mode places Pi-compatible calls on tools and Fabric discovery on fabric.tools. Compose Pi core tools, MCP, Fabric providers, discovery, and extensions. QuickJS is isolated by default; the optional Node/Bun process is an unsafe trusted-code escape hatch. In full code mode, and always in Schema enforce mode, this is the exclusive model tool path.",
     promptSnippet:
       "Pi core tools, MCP, Fabric providers, discovery, and extensions",
     promptGuidelines: [

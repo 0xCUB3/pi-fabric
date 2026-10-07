@@ -158,7 +158,7 @@ See the [interface & commands reference](docs/interface.md) for every view, keyb
 
 - [Configuration](docs/configuration.md): `fabric.json`, code modes, tool capture, approvals, and budgets.
 - [Execution kernels](docs/kernels.md): exclusive TypeScript/Python selection, Monty sandboxing, CPython escape hatch, agent inheritance, and examples.
-- [Native codemode APIs](docs/codemode-parity.md): the `models` namespace, native classifiers and images, branch-local script state, output helpers, and per-call limits.
+- [Native codemode APIs](docs/codemode-parity.md): additive native tool aliases or opt-in Pi-compatible scripts, collision-safe Fabric discovery, native models/images, branch-local state, and sPTC.
 - [Prompt cache](docs/prompt-cache.md): honest cache observations and optional, time-bounded native warming leases.
 - [Thinking control](docs/thinking.md): scoped host-session reasoning effort with configured bounds that children inherit and never widen.
 - [Durable Pi runner](docs/durable-pi.md): the default isolated Pi/Fabric host, checkpoint recovery, replay boundaries, and the explicit legacy `pi` option.

@@ -73,6 +73,8 @@ interface FabricExecutorConfig {
   jevFabric: { binary: string; home: string; timeoutMs: number };
   /** TypeScript backend only; ignored by the Python kernel. */
   runtime: FabricExecutorRuntime;
+  /** Add native tool aliases, or opt into Pi's script-level naming/result ergonomics. */
+  codemodeProfile: "additive" | "native";
   timeoutMs: number;
   /** Policy maximum for any executor deadline, including per-invocation
    * requests and per-ref floors. Values above this are visibly normalized. */
@@ -475,6 +477,7 @@ export const DEFAULT_FABRIC_CONFIG: FabricConfig = {
     cpython: { binary: "python3" },
     jevFabric: { binary: "", home: "", timeoutMs: 3_600_000 },
     runtime: "quickjs",
+    codemodeProfile: "additive",
     timeoutMs: 120_000,
     maxTimeoutMs: 900_000,
     hostCallTimeouts: {},
@@ -1034,6 +1037,7 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
         timeoutMs: boundedInteger(jevFabric.timeoutMs, DEFAULT_FABRIC_CONFIG.executor.jevFabric.timeoutMs, 1_000, MAX_EXECUTOR_TIMEOUT_MS),
       },
       runtime: executorRuntime,
+      codemodeProfile: executor.codemodeProfile === "native" ? "native" : "additive",
       maxTimeoutMs: boundedInteger(
         executor.maxTimeoutMs,
         DEFAULT_FABRIC_CONFIG.executor.maxTimeoutMs,

@@ -247,8 +247,6 @@ export interface AgentWorkerOptions {
   schemaFile?: string;
   cwd: string;
   piBinary: string;
-  /** Running host Pi package; durable workers resolve omitted host peers from it. */
-  piPackageDir?: string;
   claudeBinary: string;
   vedaBinary: string;
   vedaBackend: string;
